@@ -14,6 +14,7 @@ export type Tx = {
   created_by: number;
   payer_name: string;
   invoice_number: string | null;
+  supplier_ids: number[];
 };
 
 export type Attachment = {
@@ -44,7 +45,8 @@ export async function getMembers(ledgerId: number): Promise<Member[]> {
 export async function listTransactions(ledgerId: number): Promise<Tx[]> {
   return q<Tx>(
     `SELECT t.id, t.kind, t.paid_by, t.amount_cents, t.other_share_cents, t.description,
-            to_char(t.occurred_on, 'YYYY-MM-DD') AS occurred_on, t.created_by, u.name AS payer_name, t.invoice_number
+            to_char(t.occurred_on, 'YYYY-MM-DD') AS occurred_on, t.created_by, u.name AS payer_name, t.invoice_number,
+            COALESCE((SELECT array_agg(ts.supplier_id ORDER BY ts.supplier_id) FROM transaction_suppliers ts WHERE ts.transaction_id = t.id), '{}')::int[] AS supplier_ids
      FROM transactions t JOIN users u ON u.id = t.paid_by
      WHERE t.ledger_id = $1 AND t.deleted_at IS NULL
      ORDER BY t.occurred_on DESC, t.id DESC`,
@@ -55,7 +57,8 @@ export async function listTransactions(ledgerId: number): Promise<Tx[]> {
 export async function getTransaction(ledgerId: number, id: number): Promise<Tx | null> {
   const rows = await q<Tx>(
     `SELECT t.id, t.kind, t.paid_by, t.amount_cents, t.other_share_cents, t.description,
-            to_char(t.occurred_on, 'YYYY-MM-DD') AS occurred_on, t.created_by, u.name AS payer_name, t.invoice_number
+            to_char(t.occurred_on, 'YYYY-MM-DD') AS occurred_on, t.created_by, u.name AS payer_name, t.invoice_number,
+            COALESCE((SELECT array_agg(ts.supplier_id ORDER BY ts.supplier_id) FROM transaction_suppliers ts WHERE ts.transaction_id = t.id), '{}')::int[] AS supplier_ids
      FROM transactions t JOIN users u ON u.id = t.paid_by
      WHERE t.ledger_id = $1 AND t.id = $2 AND t.deleted_at IS NULL`,
     [ledgerId, id],

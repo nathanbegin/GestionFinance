@@ -3,15 +3,17 @@ import { requireUser } from "@/lib/auth";
 import { balanceForUser, computeNet, getMembers, listAttachments, listTransactions, todayLocal } from "@/lib/ledger";
 import { formatMoney } from "@/lib/money";
 import { q } from "@/lib/db";
+import { listSuppliers } from "@/lib/suppliers";
 import Nav from "@/components/Nav";
 import TxList from "@/components/TxList";
 
 export default async function Home() {
   const user = await requireUser();
-  const [members, txs, attachments, ledger] = await Promise.all([
+  const [members, txs, attachments, suppliers, ledger] = await Promise.all([
     getMembers(user.ledger_id),
     listTransactions(user.ledger_id),
     listAttachments(user.ledger_id),
+    listSuppliers(user.ledger_id),
     q<{ invite_code: string }>("SELECT invite_code FROM ledgers WHERE id = $1", [user.ledger_id]),
   ]);
   const net = computeNet(txs, members);
@@ -81,7 +83,7 @@ export default async function Home() {
           <h2>Dernières transactions</h2>
           <Link href="/transactions">Tout voir →</Link>
         </div>
-        <TxList txs={txs.slice(0, 5)} userId={user.id} other={other} attachments={attachments} />
+        <TxList txs={txs.slice(0, 5)} userId={user.id} other={other} attachments={attachments} suppliers={suppliers} />
 
         <div className="actions-bar">
           <a className="button" href="/api/export/pdf">

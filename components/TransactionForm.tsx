@@ -2,7 +2,9 @@
 
 import { useActionState, useState } from "react";
 import { saveTransaction } from "@/app/actions";
+import type { Supplier } from "@/lib/suppliers";
 import FilePicker from "./FilePicker";
+import SupplierLogo from "./SupplierLogo";
 
 type Member = { id: number; name: string };
 export type Initial = {
@@ -14,6 +16,7 @@ export type Initial = {
   share_pct: number;
   occurred_on: string;
   invoice_number: string;
+  supplier_ids: number[];
 };
 
 export default function TransactionForm({
@@ -21,11 +24,13 @@ export default function TransactionForm({
   initial,
   submitLabel,
   ledgerId,
+  suppliers,
 }: {
   members: Member[];
   initial: Initial;
   submitLabel: string;
   ledgerId: number;
+  suppliers: Supplier[];
 }) {
   const [state, action, pending] = useActionState(saveTransaction, undefined);
   const [kind, setKind] = useState(initial.kind);
@@ -98,6 +103,21 @@ export default function TransactionForm({
           doit ce montant. Si chacun a un solde, ajoutez un solde de départ de chaque côté : ils se compensent.
         </p>
       )}
+      <fieldset className="supplier-picks">
+        <legend>Fournisseur(s) — logo affiché sur la transaction</legend>
+        {suppliers.length === 0 && (
+          <span className="muted">
+            Aucun fournisseur : ajoutez-en dans <a href="/parametres">Paramètres</a>.
+          </span>
+        )}
+        {suppliers.map((s) => (
+          <label className="chip" key={s.id}>
+            <input type="checkbox" name="suppliers" value={s.id} defaultChecked={initial.supplier_ids.includes(s.id)} />
+            <SupplierLogo s={s} size={22} />
+            {s.name}
+          </label>
+        ))}
+      </fieldset>
       <FilePicker ledgerId={ledgerId} onBusy={setUploading} />
       {state?.error && <p className="error">{state.error}</p>}
       <button disabled={pending || uploading}>{uploading ? "Envoi des fichiers…" : submitLabel}</button>

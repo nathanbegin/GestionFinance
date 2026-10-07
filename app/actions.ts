@@ -11,6 +11,7 @@ import { logAudit, type Snapshot } from "@/lib/audit";
 import { parseAmount } from "@/lib/money";
 import { MAX_ROWS, parseWorkbook } from "@/lib/importXlsx";
 import { insertAttachments, prepareUploads, type Prepared } from "@/lib/attachments";
+import { listSuppliers, readLogo, seedSuppliers } from "@/lib/suppliers";
 
 export type FormState = { error?: string; ok?: string; details?: string[] } | undefined;
 
@@ -46,6 +47,7 @@ export async function register(_: FormState, f: FormData): Promise<FormState> {
     const code = randomBytes(5).toString("hex").toUpperCase();
     const rows = await q<{ id: number }>("INSERT INTO ledgers (invite_code) VALUES ($1) RETURNING id", [code]);
     ledgerId = rows[0].id;
+    await seedSuppliers(ledgerId);
   }
 
   const hash = await bcrypt.hash(password, 10);
@@ -79,6 +81,12 @@ export async function logout() {
 }
 
 /* ---------- Transactions ---------- */
+
+async function setSuppliers(txId: number, ids: number[]) {
+  await q("DELETE FROM transaction_suppliers WHERE transaction_id = $1", [txId]);
+  if (ids.length)
+    await q("INSERT INTO transaction_suppliers (transaction_id, supplier_id) SELECT $1, unnest($2::int[])", [txId, ids]);
+}
 
 async function attach(user: User, txId: number, description: string, items: Prepared[]) {
   await insertAttachments(user.ledger_id, txId, user.id, items);
@@ -119,6 +127,7 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
   const pct = Number(str(f, "share_pct") || String(user.default_share_pct));
   const invoice = str(f, "invoice_number") || null;
   const uploadsRaw = String(f.get("uploads") ?? "");
+  const wanted = f.getAll("suppliers").map((x) => Number(x));
 
   if (kind !== "expense" && kind !== "repayment" && kind !== "opening") return { error: "Type invalide." };
   if (!description || description.length > 200) return { error: "Description requise (200 caractères max)." };
@@ -133,6 +142,10 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
   const prep = await prepareUploads(user.ledger_id, uploadsRaw);
   if ("error" in prep) return { error: prep.error };
 
+  const allSuppliers = await listSuppliers(user.ledger_id);
+  const supplierIds = allSuppliers.filter((s) => wanted.includes(s.id)).map((s) => s.id);
+  const namesOf = (ids: number[]) => allSuppliers.filter((s) => ids.includes(s.id)).map((s) => s.name).join(", ");
+
   const otherShare = kind !== "expense" ? amount : Math.round((amount * pct) / 100);
   const after: Snapshot = {
     kind,
@@ -142,6 +155,7 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
     other_share_cents: otherShare,
     occurred_on: date,
     invoice_number: invoice,
+    suppliers: namesOf(supplierIds),
   };
 
   if (idRaw) {
@@ -163,9 +177,11 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
         other_share_cents: before.other_share_cents,
         occurred_on: before.occurred_on,
         invoice_number: before.invoice_number,
+        suppliers: namesOf(before.supplier_ids),
       } satisfies Snapshot,
       after,
     });
+    await setSuppliers(id, supplierIds);
     await attach(user, id, description, prep.prepared);
   } else {
     const rows = await q<{ id: number }>(
@@ -174,6 +190,7 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
       [user.ledger_id, kind, paidBy, amount, otherShare, description, date, user.id, invoice],
     );
     await logAudit(user.ledger_id, user.id, "transaction.create", rows[0].id, { after });
+    await setSuppliers(rows[0].id, supplierIds);
     await attach(user, rows[0].id, description, prep.prepared);
   }
 
@@ -215,7 +232,8 @@ export async function importTransactions(_: FormState, f: FormData): Promise<For
   if (!(file instanceof File) || file.size === 0) return { error: "Choisissez un fichier .xlsx." };
   if (file.size > 2_000_000) return { error: "Fichier trop volumineux (2 Mo max)." };
 
-  const { rows, errors } = await parseWorkbook(await file.arrayBuffer(), members, user);
+  const suppliers = await listSuppliers(user.ledger_id);
+  const { rows, errors } = await parseWorkbook(await file.arrayBuffer(), members, user, suppliers);
   if (errors.length)
     return { error: "Rien n'a été importé. Corrigez le fichier et réessayez.", details: errors.slice(0, 30) };
   if (rows.length > MAX_ROWS) return { error: `Maximum ${MAX_ROWS} lignes par fichier.` };
@@ -226,6 +244,11 @@ export async function importTransactions(_: FormState, f: FormData): Promise<For
       text: `INSERT INTO transactions (ledger_id, kind, paid_by, amount_cents, other_share_cents, description, occurred_on, created_by, invoice_number)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       params: [user.ledger_id, r.kind, r.paid_by, r.amount_cents, r.other_share_cents, r.description, r.occurred_on, user.id, r.invoice_number],
+    },
+    {
+      text: `INSERT INTO transaction_suppliers (transaction_id, supplier_id)
+             SELECT currval(pg_get_serial_sequence('transactions','id')), unnest($1::int[])`,
+      params: [r.supplier_ids],
     },
     {
       text: `INSERT INTO audit_log (ledger_id, user_id, transaction_id, action, details)
@@ -242,6 +265,7 @@ export async function importTransactions(_: FormState, f: FormData): Promise<For
             other_share_cents: r.other_share_cents,
             occurred_on: r.occurred_on,
             invoice_number: r.invoice_number,
+            suppliers: suppliers.filter((s) => r.supplier_ids.includes(s.id)).map((s) => s.name).join(", "),
           } satisfies Snapshot,
         }),
       ],
@@ -252,6 +276,73 @@ export async function importTransactions(_: FormState, f: FormData): Promise<For
   revalidatePath("/", "layout");
   revalidatePath("/historique");
   return { ok: `${rows.length} transaction${rows.length > 1 ? "s" : ""} importée${rows.length > 1 ? "s" : ""}.` };
+}
+
+/* ---------- Fournisseurs ---------- */
+
+const COLOR = /^#[0-9a-fA-F]{6}$/;
+
+export async function addSupplier(_: FormState, f: FormData): Promise<FormState> {
+  const user = await requireUser();
+  const name = str(f, "name");
+  const color = str(f, "color") || "#2459d6";
+  if (name.length < 1 || name.length > 60) return { error: "Nom requis (60 caractères max)." };
+  if (!COLOR.test(color)) return { error: "Couleur invalide." };
+  const logo = await readLogo(f.get("logo"));
+  if (logo && "error" in logo) return { error: logo.error };
+  const dup = await q("SELECT 1 FROM suppliers WHERE ledger_id = $1 AND lower(name) = lower($2) AND deleted_at IS NULL", [
+    user.ledger_id,
+    name,
+  ]);
+  if (dup.length) return { error: "Ce fournisseur existe déjà." };
+  await q(
+    "INSERT INTO suppliers (ledger_id, name, color, logo_type, logo_data) VALUES ($1, $2, $3, $4, decode($5, 'base64'))",
+    [user.ledger_id, name, color, logo?.type ?? null, logo?.b64 ?? null],
+  );
+  await logAudit(user.ledger_id, user.id, "supplier.change", null, { description: `Fournisseur ajouté : ${name}` });
+  revalidatePath("/", "layout");
+  return { ok: `« ${name} » ajouté.` };
+}
+
+export async function updateSupplier(_: FormState, f: FormData): Promise<FormState> {
+  const user = await requireUser();
+  const id = Number(str(f, "id"));
+  const name = str(f, "name");
+  const color = str(f, "color");
+  if (name.length < 1 || name.length > 60) return { error: "Nom requis (60 caractères max)." };
+  if (!COLOR.test(color)) return { error: "Couleur invalide." };
+  const logo = await readLogo(f.get("logo"));
+  if (logo && "error" in logo) return { error: logo.error };
+  const dup = await q(
+    "SELECT 1 FROM suppliers WHERE ledger_id = $1 AND lower(name) = lower($2) AND deleted_at IS NULL AND id <> $3",
+    [user.ledger_id, name, id],
+  );
+  if (dup.length) return { error: "Un autre fournisseur porte déjà ce nom." };
+
+  const removeLogo = str(f, "remove_logo") === "on";
+  const res = await q(
+    `UPDATE suppliers SET name = $1, color = $2, updated_at = now(),
+       logo_type = CASE WHEN $3::text IS NOT NULL THEN $3 WHEN $4::boolean THEN NULL ELSE logo_type END,
+       logo_data = CASE WHEN $5::text IS NOT NULL THEN decode($5, 'base64') WHEN $4::boolean THEN NULL ELSE logo_data END
+     WHERE id = $6 AND ledger_id = $7 AND deleted_at IS NULL RETURNING id`,
+    [name, color, logo?.type ?? null, removeLogo, logo?.b64 ?? null, id, user.ledger_id],
+  );
+  if (!res.length) return { error: "Fournisseur introuvable." };
+  await logAudit(user.ledger_id, user.id, "supplier.change", null, { description: `Fournisseur modifié : ${name}` });
+  revalidatePath("/", "layout");
+  return { ok: "Fournisseur mis à jour." };
+}
+
+export async function deleteSupplier(f: FormData) {
+  const user = await requireUser();
+  const id = Number(str(f, "id"));
+  const rows = await q<{ name: string }>(
+    "UPDATE suppliers SET deleted_at = now() WHERE id = $1 AND ledger_id = $2 AND deleted_at IS NULL RETURNING name",
+    [id, user.ledger_id],
+  );
+  if (rows.length)
+    await logAudit(user.ledger_id, user.id, "supplier.change", null, { description: `Fournisseur supprimé : ${rows[0].name}` });
+  revalidatePath("/", "layout");
 }
 
 /* ---------- Paramètres ---------- */

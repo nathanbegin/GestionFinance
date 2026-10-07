@@ -185,3 +185,30 @@ ul.errors { margin: 0; padding-left: 18px; color: var(--bad); font-size: 0.9rem;
   .search { flex-wrap: wrap; }
   .search button, .search .button { flex: 1; }
 }
+
+/* ----- Fournisseurs et logos ----- */
+.slogo {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; object-fit: contain; background: #fff; border: 1px solid var(--line);
+}
+.slogo.mono { color: #fff; font-weight: 700; border: 0; letter-spacing: 0.02em; }
+.tx-logos { display: flex; flex-direction: column; gap: 4px; flex: none; }
+.tx { align-items: flex-start; }
+.tx-main { flex: 1; }
+fieldset.supplier-picks { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+fieldset.supplier-picks legend { font-size: 0.9rem; font-weight: 500; padding: 0 6px; }
+label.chip {
+  flex-direction: row; align-items: center; gap: 8px; width: auto; font-weight: 500;
+  border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px 6px 8px; cursor: pointer; min-height: 40px;
+}
+label.chip input { width: auto; min-height: 0; }
+label.chip:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+label.check { flex-direction: row; align-items: center; gap: 8px; }
+label.check input { width: auto; min-height: 0; }
+.color-field { flex: 0 0 120px; }
+.color-field input { padding: 2px; }
+details.supplier-row { border-bottom: 1px solid var(--line); padding: 10px 0; }
+details.supplier-row:last-child { border-bottom: 0; }
+details.supplier-row summary { display: flex; align-items: center; gap: 12px; cursor: pointer; list-style: none; }
+details.supplier-row summary::-webkit-details-marker { display: none; }
+.supplier-name { flex: 1; font-weight: 600; }

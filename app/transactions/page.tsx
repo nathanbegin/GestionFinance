@@ -1,20 +1,25 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { getMembers, listAttachments, listTransactions } from "@/lib/ledger";
+import { listSuppliers } from "@/lib/suppliers";
 import Nav from "@/components/Nav";
 import TxList from "@/components/TxList";
 
 export default async function TransactionsPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const user = await requireUser();
   const query = ((await searchParams).q ?? "").trim();
-  const [members, all, attachments] = await Promise.all([
+  const [members, all, attachments, suppliers] = await Promise.all([
     getMembers(user.ledger_id),
     listTransactions(user.ledger_id),
     listAttachments(user.ledger_id),
+    listSuppliers(user.ledger_id),
   ]);
   const needle = query.toLowerCase();
   const txs = needle
-    ? all.filter((t) => `${t.description} ${t.invoice_number ?? ""} ${t.occurred_on}`.toLowerCase().includes(needle))
+    ? all.filter((t) => {
+        const names = suppliers.filter((s) => t.supplier_ids.includes(s.id)).map((s) => s.name).join(" ");
+        return `${t.description} ${t.invoice_number ?? ""} ${t.occurred_on} ${names}`.toLowerCase().includes(needle);
+      })
     : all;
   const other = members.find((m) => m.id !== user.id);
 
@@ -24,7 +29,7 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
       <main>
         <h1>Transactions ({txs.length})</h1>
         <form className="search" method="get">
-          <input name="q" type="search" placeholder="Rechercher (description, n° de facture, date)" defaultValue={query} />
+          <input name="q" type="search" placeholder="Rechercher (description, fournisseur, n° de facture, date)" defaultValue={query} />
           <button>Chercher</button>
           {query && (
             <Link href="/transactions" className="button">
@@ -37,6 +42,7 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
           userId={user.id}
           other={other}
           attachments={attachments}
+          suppliers={suppliers}
           empty={query ? "Aucun résultat." : "Aucune transaction pour l'instant."}
         />
       </main>

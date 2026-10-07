@@ -2,7 +2,9 @@ import Link from "next/link";
 import { deleteTransaction } from "@/app/actions";
 import { formatMoney } from "@/lib/money";
 import type { Attachment, Member, Tx } from "@/lib/ledger";
+import type { Supplier } from "@/lib/suppliers";
 import DeleteButton from "./DeleteButton";
+import SupplierLogo from "./SupplierLogo";
 
 const KIND_LABEL = { expense: "Dépense", repayment: "Remboursement", opening: "Solde de départ" } as const;
 
@@ -11,12 +13,14 @@ export default function TxList({
   userId,
   other,
   attachments,
+  suppliers,
   empty = "Aucune transaction pour l'instant.",
 }: {
   txs: Tx[];
   userId: number;
   other?: Member;
   attachments: Map<number, Attachment[]>;
+  suppliers: Supplier[];
   empty?: string;
 }) {
   if (!txs.length)
@@ -31,8 +35,16 @@ export default function TxList({
     <div className="card">
       {txs.map((t) => {
         const files = attachments.get(t.id) ?? [];
+        const logos = suppliers.filter((s) => t.supplier_ids.includes(s.id));
         return (
           <div className="tx" key={t.id}>
+            {logos.length > 0 && (
+              <div className="tx-logos">
+                {logos.map((s) => (
+                  <SupplierLogo key={s.id} s={s} size={32} />
+                ))}
+              </div>
+            )}
             <div className="tx-main">
               <div className="tx-title">
                 {t.description}

@@ -63,6 +63,27 @@ const statements = [
   `ALTER TABLE attachments ALTER COLUMN data DROP NOT NULL`,
   `ALTER TABLE attachments ADD COLUMN IF NOT EXISTS blob_pathname TEXT`,
   `CREATE INDEX IF NOT EXISTS idx_att_tx ON attachments(transaction_id)`,
+  `CREATE TABLE IF NOT EXISTS suppliers (
+    id SERIAL PRIMARY KEY,
+    ledger_id INTEGER NOT NULL REFERENCES ledgers(id),
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '#2459d6',
+    logo_type TEXT,
+    logo_data BYTEA,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_supplier_name ON suppliers(ledger_id, lower(name)) WHERE deleted_at IS NULL`,
+  `CREATE TABLE IF NOT EXISTS transaction_suppliers (
+    transaction_id INTEGER NOT NULL REFERENCES transactions(id),
+    supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+    PRIMARY KEY (transaction_id, supplier_id)
+  )`,
+  `INSERT INTO suppliers (ledger_id, name, color)
+   SELECT l.id, s.name, s.color FROM ledgers l
+   CROSS JOIN (VALUES ('Uber', '#000000'), ('Sixt', '#ff5f00'), ('TELUS', '#4b286d'), ('Fertilisation du Nord ProVert', '#2e7d32')) AS s(name, color)
+   WHERE NOT EXISTS (SELECT 1 FROM suppliers x WHERE x.ledger_id = l.id)`,
   `CREATE INDEX IF NOT EXISTS idx_tx_ledger ON transactions(ledger_id, occurred_on)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_ledger ON audit_log(ledger_id, created_at DESC)`,
 ];

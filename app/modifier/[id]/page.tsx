@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { getMembers, getTransaction, listAttachments } from "@/lib/ledger";
+import { listSuppliers } from "@/lib/suppliers";
 import AttachmentList from "@/components/AttachmentList";
 import { toInput } from "@/lib/money";
 import Nav from "@/components/Nav";
@@ -12,10 +13,11 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
   const { id } = await params;
   const txId = Number(id);
   if (!Number.isInteger(txId)) notFound();
-  const [tx, members, atts] = await Promise.all([
+  const [tx, members, atts, suppliers] = await Promise.all([
     getTransaction(user.ledger_id, txId),
     getMembers(user.ledger_id),
     listAttachments(user.ledger_id),
+    listSuppliers(user.ledger_id),
   ]);
   if (!tx) notFound();
 
@@ -31,6 +33,7 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
           members={members}
           submitLabel="Enregistrer les modifications"
           ledgerId={user.ledger_id}
+          suppliers={suppliers}
           initial={{
             id: tx.id,
             kind: tx.kind,
@@ -40,6 +43,7 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
             share_pct: pct,
             occurred_on: tx.occurred_on,
             invoice_number: tx.invoice_number ?? "",
+            supplier_ids: tx.supplier_ids,
           }}
         />
         <h2>Pièces jointes</h2>

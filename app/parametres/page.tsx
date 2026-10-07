@@ -4,12 +4,15 @@ import { getMembers } from "@/lib/ledger";
 import { q } from "@/lib/db";
 import Nav from "@/components/Nav";
 import { NameForm, PasswordForm, ShareForm } from "@/components/SettingsForms";
+import { AddSupplierForm, SupplierList } from "@/components/SupplierForms";
+import { listSuppliers } from "@/lib/suppliers";
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  const [members, ledger] = await Promise.all([
+  const [members, ledger, suppliers] = await Promise.all([
     getMembers(user.ledger_id),
     q<{ invite_code: string }>("SELECT invite_code FROM ledgers WHERE id = $1", [user.ledger_id]),
+    listSuppliers(user.ledger_id),
   ]);
   const h = await headers();
   const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
@@ -37,6 +40,16 @@ export default async function SettingsPage() {
               </div>
             </>
           )}
+        </div>
+
+        <h2>Fournisseurs et logos</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Liez un ou plusieurs fournisseurs à une transaction : leur logo s&apos;affiche dans les listes pour les repérer d&apos;un coup
+          d&apos;œil. Sans image, une pastille de couleur avec les initiales est utilisée.
+        </p>
+        <SupplierList suppliers={suppliers} />
+        <div style={{ marginTop: 12 }}>
+          <AddSupplierForm />
         </div>
 
         <h2>Profil</h2>

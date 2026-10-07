@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { parseAmount } from "./money";
 
 export const SHEET = "Dépenses";
-export const HEADERS = ["Date", "Description", "Montant", "Payé par", "Part de l'autre (%)", "Type", "Numéro de facture"] as const;
+export const HEADERS = ["Date", "Description", "Montant", "Payé par", "Part de l'autre (%)", "Type", "Numéro de facture", "Fournisseurs"] as const;
 const REQUIRED_COLS = 6; // la 7e colonne (facture) est facultative : les anciens modèles restent valides
 export const MAX_ROWS = 200;
 export const EXAMPLE_PREFIX = "(exemple)";
@@ -17,6 +17,7 @@ export type ImportRow = {
   paid_by_name: string;
   other_share_cents: number;
   invoice_number: string | null;
+  supplier_ids: number[];
 };
 
 type Member = { id: number; name: string };
@@ -62,7 +63,7 @@ function amountCents(raw: ExcelJS.CellValue): number | null {
   return parseAmount(text(v));
 }
 
-export async function buildTemplate(members: Member[], today: string): Promise<ArrayBuffer> {
+export async function buildTemplate(members: Member[], today: string, supplierNames: string[] = []): Promise<ArrayBuffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet(SHEET, { views: [{ state: "frozen", ySplit: 1 }] });
   ws.columns = [
@@ -73,6 +74,7 @@ export async function buildTemplate(members: Member[], today: string): Promise<A
     { header: HEADERS[4], key: "pct", width: 20 },
     { header: HEADERS[5], key: "kind", width: 16 },
     { header: HEADERS[6], key: "inv", width: 20 },
+    { header: HEADERS[7], key: "sup", width: 30 },
   ];
   const head = ws.getRow(1);
   head.font = { bold: true, color: { argb: "FFFFFFFF" } };
@@ -80,7 +82,7 @@ export async function buildTemplate(members: Member[], today: string): Promise<A
 
   const [a, b] = members;
   const date = new Date(today + "T00:00:00Z");
-  ws.addRow({ d: date, desc: "(Exemple) Épicerie", amt: 87.35, who: a?.name ?? "", pct: 50, kind: "Dépense", inv: "F-1001" });
+  ws.addRow({ d: date, desc: "(Exemple) Épicerie", amt: 87.35, who: a?.name ?? "", pct: 50, kind: "Dépense", inv: "F-1001", sup: supplierNames[0] ?? "" });
   ws.addRow({ d: date, desc: "(Exemple) Remboursement par virement", amt: 40, who: b?.name ?? a?.name ?? "", pct: "", kind: "Remboursement" });
   ws.getColumn(1).numFmt = "yyyy-mm-dd";
   ws.getColumn(3).numFmt = "#,##0.00";
@@ -113,6 +115,7 @@ export async function buildTemplate(members: Member[], today: string): Promise<A
     "Part de l'autre (%) : entier de 0 à 100 = part due par l'autre personne. Vide = votre répartition par défaut (Paramètres). Ignoré pour un remboursement.",
     "Type : Dépense, Remboursement ou Solde de départ. Vide = Dépense. Un remboursement compte pour 100 % du montant.",
     "Solde de départ : montant déjà dû avant l'application. « Payé par » = la personne à qui on doit cet argent. Description facultative.",
+    `Fournisseurs : facultatif, un ou plusieurs noms séparés par un point-virgule${supplierNames.length ? ` (${supplierNames.join(" ; ")})` : ""}. Ils doivent exister dans Paramètres.`,
     "Numéro de facture : facultatif, 50 caractères max. Les pièces jointes (photos, PDF) s'ajoutent ensuite, transaction par transaction.",
     "",
     "Les lignes dont la description commence par « (Exemple) » sont ignorées : vous pouvez les laisser ou les supprimer.",
@@ -129,6 +132,7 @@ export async function parseWorkbook(
   data: ArrayBuffer,
   members: Member[],
   me: { id: number; default_share_pct: number },
+  suppliers: { id: number; name: string }[] = [],
 ): Promise<ParseResult> {
   const wb = new ExcelJS.Workbook();
   try {
@@ -180,6 +184,13 @@ export async function parseWorkbook(
     const invoice = text(cells[6].value) || null;
     if (invoice && invoice.length > 50) problems.push("numéro de facture trop long (50 max)");
 
+    const supplierIds: number[] = [];
+    for (const part of text(cells[7].value).split(/[;\n]/).map((p) => p.trim()).filter(Boolean)) {
+      const found = suppliers.find((s) => norm(s.name) === norm(part));
+      if (!found) problems.push(`fournisseur inconnu : « ${part} » (à créer dans Paramètres)`);
+      else if (!supplierIds.includes(found.id)) supplierIds.push(found.id);
+    }
+
     let pct = me.default_share_pct;
     const pctRaw = unwrap(cells[4].value);
     if (kind === "expense" && text(pctRaw) !== "") {
@@ -203,6 +214,7 @@ export async function parseWorkbook(
       paid_by_name: payer.name,
       other_share_cents: kind !== "expense" ? amount : Math.round((amount * pct) / 100),
       invoice_number: invoice,
+      supplier_ids: supplierIds,
     });
   });
 

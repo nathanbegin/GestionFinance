@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { upload } from "@vercel/blob/client";
+import { uploadPresigned } from "@vercel/blob/client";
 
 const MAX_FILES = 10;
 const MAX_TOTAL = 50_000_000;
@@ -56,7 +56,7 @@ export default function FilePicker({ ledgerId, onBusy }: { ledgerId: number; onB
           throw new Error(`« ${file.name} » : seuls les photos et les PDF sont acceptés.`);
 
         const safe = file.name.replace(/[^\w.\- ]+/g, "_").slice(0, 80);
-        const blob = await upload(`l${ledgerId}/${Date.now()}-${safe}`, file, {
+        const blob = await uploadPresigned(`l${ledgerId}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${safe}`, file, {
           access: "private",
           handleUploadUrl: "/api/blob/upload",
           contentType: file.type,

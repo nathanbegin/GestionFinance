@@ -197,26 +197,6 @@ export async function renderPdf(s: Statement): Promise<Uint8Array> {
     y -= 13;
   }
 
-  // Légende des fournisseurs utilisés
-  const usedIds = new Set(s.txs.flatMap((t) => t.supplier_ids));
-  const used = s.suppliers.filter((x) => usedIds.has(x.id));
-  if (used.length) {
-    y -= 6;
-    text("Fournisseurs :", MARGIN, 9, bold);
-    let x = MARGIN + bold.widthOfTextAtSize("Fournisseurs :", 9) + 10;
-    for (const sup of used) {
-      const label = fit(sup.name, font, 9, 160);
-      const w = LOGO + 4 + font.widthOfTextAtSize(label, 9) + 14;
-      if (x + w > PAGE_W - MARGIN) {
-        x = MARGIN;
-        y -= 16;
-      }
-      drawLogo(sup, x, y - 3);
-      page.drawText(label, { x: x + LOGO + 4, y, size: 9, font, color: INK });
-      x += w;
-    }
-    y -= 8;
-  }
   y -= 14;
 
   // Colonnes (les miniatures occupent la première, devant la date)

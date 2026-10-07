@@ -109,7 +109,7 @@ label.button-like { font-size: 0.95rem; flex: 1; }
 .hero .button.ghost { background: transparent; color: #fff; border-color: rgba(255, 255, 255, 0.6); }
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 16px; }
 .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
-.kpi-label { color: var(--muted); font-size: 0.78rem; text-transform: capitalize; }
+.kpi-label { color: var(--muted); font-size: 0.78rem; }
 .kpi-value { font-size: 1.15rem; font-weight: 700; margin-top: 4px; }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; }
 .search { display: flex; gap: 8px; margin-bottom: 12px; }

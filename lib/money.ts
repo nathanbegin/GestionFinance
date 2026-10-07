@@ -1,6 +1,6 @@
 /** "12,50" | "12.5" | "1 234,56" -> cents, ou null si invalide */
 export function parseAmount(input: string): number | null {
-  const s = input.replace(/[\s  $]/g, "").replace(",", ".");
+  const s = input.replace(/[\s\u00a0\u202f$]/g, "").replace(",", ".");
   if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
   const [whole, frac = ""] = s.split(".");
   const cents = Number(whole) * 100 + Number((frac + "00").slice(0, 2));
@@ -14,9 +14,9 @@ export function formatMoney(cents: number): string {
   const abs = Math.abs(cents);
   const whole = Math.floor(abs / 100)
     .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+    .replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
   const frac = (abs % 100).toString().padStart(2, "0");
-  return `${sign}${whole},${frac} $`;
+  return `${sign}${whole},${frac}\u00a0$`;
 }
 
 /** cents -> "1234,56" pour champ de formulaire */

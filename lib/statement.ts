@@ -35,7 +35,7 @@ export async function buildStatement(user: User): Promise<Statement> {
     timeZone: "America/Toronto",
   })
     .format(new Date())
-    .replace(/[  ]/g, " ");
+    .replace(/[\u00a0\u202f]/g, " ");
   const totals = members.map((m) => ({
     member: m,
     expensesPaid: txs.filter((t) => t.kind === "expense" && t.paid_by === m.id).reduce((s, t) => s + t.amount_cents, 0),

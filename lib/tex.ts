@@ -2,7 +2,7 @@ import type { Statement } from "./statement";
 
 export function texEscape(s: string): string {
   return s
-    .replace(/[  ]/g, " ")
+    .replace(/[\u00a0\u202f]/g, " ")
     // emojis / caractères hors plan de base : non supportés par pdflatex
     .replace(/[\u{10000}-\u{10FFFF}]/gu, "?")
     .replace(/[\u0000-\u001f\u007f]/g, " ")

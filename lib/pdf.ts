@@ -33,7 +33,7 @@ export async function renderPdf(s: Statement): Promise<Uint8Array> {
 
   // Remplace tout caractère que la police standard ne sait pas encoder
   const safe = (t: string) =>
-    Array.from(t.replace(/[  ]/g, " "))
+    Array.from(t.replace(/[\u00a0\u202f]/g, " "))
       .map((c) => (supported.has(c.codePointAt(0)!) ? c : "?"))
       .join("");
 

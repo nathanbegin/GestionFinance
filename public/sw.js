@@ -1,5 +1,5 @@
 /* Service worker de « Gestion des finances » : installation, accès hors ligne limité, notifications. */
-const VERSION = "v2";
+const VERSION = "v3";
 const STATIC_CACHE = `static-${VERSION}`;
 const PAGES_CACHE = `pages-${VERSION}`;
 // Seules ces pages sont conservées pour une utilisation sans réseau (saisie d'une transaction + liste d'attente).
@@ -97,13 +97,18 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     (async () => {
       try {
+        // Le réseau d'un téléphone met parfois plusieurs secondes à revenir : si l'appareil se dit en ligne,
+        // on réessaie quelques fois avant de conclure qu'il est vraiment hors ligne.
+        const attempts = keep ? 2 : 3;
         let res;
-        try {
-          res = await (keep ? withTimeout(fetch(req), 8000) : fetch(req));
-        } catch (first) {
-          if (!self.navigator.onLine) throw first;
-          await new Promise((r) => setTimeout(r, 1500)); // connexion en cours de rétablissement : un nouvel essai
-          res = await (keep ? withTimeout(fetch(req), 8000) : fetch(req));
+        for (let attempt = 1; ; attempt++) {
+          try {
+            res = await (keep ? withTimeout(fetch(req), 6000) : fetch(req));
+            break;
+          } catch (err) {
+            if (!self.navigator.onLine || attempt >= attempts) throw err;
+            await new Promise((r) => setTimeout(r, 1200 * attempt));
+          }
         }
         // On ne conserve que les pages normales (pas les redirections vers /login) de la liste autorisée
         if (keep && res.ok && !res.redirected) {

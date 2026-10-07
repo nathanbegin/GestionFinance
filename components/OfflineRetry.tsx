@@ -24,6 +24,23 @@ function canAutoReload(): boolean {
 export default function OfflineRetry() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [diag, setDiag] = useState("");
+
+  // Ligne de diagnostic : version de la copie hors ligne et état du réseau vu par l'appareil
+  useEffect(() => {
+    const update = async () => {
+      const keys = "caches" in window ? await caches.keys() : [];
+      const version = keys.find((k) => k.startsWith("pages-"))?.replace("pages-", "") ?? "?";
+      setDiag(`Copie hors ligne ${version} · réseau ${navigator.onLine ? "détecté" : "non détecté"}`);
+    };
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
 
   const go = useCallback(() => {
     // La page de secours est servie à l'adresse demandée : recharger rouvre donc la bonne page.
@@ -70,6 +87,7 @@ export default function OfflineRetry() {
       </button>
       {message && <p className="muted" style={{ margin: 0 }}>{message}</p>}
       <p className="muted" style={{ margin: 0 }}>La page se rouvrira toute seule dès que la connexion sera rétablie.</p>
+      {diag && <p className="muted" style={{ margin: 0, fontSize: "0.75rem" }}>{diag}</p>}
     </div>
   );
 }

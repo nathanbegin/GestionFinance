@@ -112,7 +112,7 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
 
   const idRaw = str(f, "id");
   const kind = str(f, "kind");
-  const description = str(f, "description");
+  const description = str(f, "description") || (str(f, "kind") === "opening" ? "Solde de départ" : "");
   const amount = parseAmount(str(f, "amount"));
   const paidBy = Number(str(f, "paid_by"));
   const date = str(f, "occurred_on");
@@ -120,7 +120,7 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
   const invoice = str(f, "invoice_number") || null;
   const files = f.getAll("files").filter((x): x is File => x instanceof File && x.size > 0);
 
-  if (kind !== "expense" && kind !== "repayment") return { error: "Type invalide." };
+  if (kind !== "expense" && kind !== "repayment" && kind !== "opening") return { error: "Type invalide." };
   if (!description || description.length > 200) return { error: "Description requise (200 caractères max)." };
   if (amount === null) return { error: "Montant invalide (ex. : 45,90)." };
   const payer = members.find((m) => m.id === paidBy);
@@ -132,7 +132,7 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
   if (kind === "expense" && (!Number.isInteger(pct) || pct < 0 || pct > 100))
     return { error: "La part de l'autre doit être un entier entre 0 et 100 %." };
 
-  const otherShare = kind === "repayment" ? amount : Math.round((amount * pct) / 100);
+  const otherShare = kind !== "expense" ? amount : Math.round((amount * pct) / 100);
   const after: Snapshot = {
     kind,
     description,

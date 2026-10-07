@@ -5,7 +5,7 @@ export type Member = { id: number; name: string };
 
 export type Tx = {
   id: number;
-  kind: "expense" | "repayment";
+  kind: "expense" | "repayment" | "opening";
   paid_by: number;
   amount_cents: number;
   other_share_cents: number;

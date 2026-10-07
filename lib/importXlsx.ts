@@ -9,7 +9,7 @@ export const EXAMPLE_PREFIX = "(exemple)";
 
 export type ImportRow = {
   line: number;
-  kind: "expense" | "repayment";
+  kind: "expense" | "repayment" | "opening";
   occurred_on: string;
   description: string;
   amount_cents: number;
@@ -88,7 +88,7 @@ export async function buildTemplate(members: Member[], today: string): Promise<A
   const names = members.map((m) => m.name);
   const listOk = names.length > 0 && names.every((n) => !/[",]/.test(n));
   for (let r = 2; r <= MAX_ROWS + 1; r++) {
-    ws.getCell(r, 6).dataValidation = { type: "list", allowBlank: true, formulae: ['"Dépense,Remboursement"'] };
+    ws.getCell(r, 6).dataValidation = { type: "list", allowBlank: true, formulae: ['"Dépense,Remboursement,Solde de départ"'] };
     if (listOk) ws.getCell(r, 4).dataValidation = { type: "list", allowBlank: true, formulae: [`"${names.join(",")}"`] };
     ws.getCell(r, 5).dataValidation = {
       type: "whole",
@@ -111,7 +111,8 @@ export async function buildTemplate(members: Member[], today: string): Promise<A
     "Montant : nombre positif en dollars (ex. 45,90). Obligatoire.",
     `Payé par : nom d'un participant${names.length ? ` (${names.join(" ou ")})` : ""}. Vide = la personne qui importe.`,
     "Part de l'autre (%) : entier de 0 à 100 = part due par l'autre personne. Vide = votre répartition par défaut (Paramètres). Ignoré pour un remboursement.",
-    "Type : Dépense ou Remboursement. Vide = Dépense. Un remboursement compte pour 100 % du montant.",
+    "Type : Dépense, Remboursement ou Solde de départ. Vide = Dépense. Un remboursement compte pour 100 % du montant.",
+    "Solde de départ : montant déjà dû avant l'application. « Payé par » = la personne à qui on doit cet argent. Description facultative.",
     "Numéro de facture : facultatif, 50 caractères max. Les pièces jointes (photos, PDF) s'ajoutent ensuite, transaction par transaction.",
     "",
     "Les lignes dont la description commence par « (Exemple) » sont ignorées : vous pouvez les laisser ou les supprimer.",
@@ -150,8 +151,8 @@ export async function parseWorkbook(
     if (n === 1) return;
     const cells = HEADERS.map((_, i) => row.getCell(i + 1));
     if (cells.every((c) => text(c.value) === "")) return;
-    const description = text(cells[1].value);
-    if (norm(description).startsWith(EXAMPLE_PREFIX)) return;
+    const rawDescription = text(cells[1].value);
+    if (norm(rawDescription).startsWith(EXAMPLE_PREFIX)) return;
     if (++seen > MAX_ROWS) {
       if (seen === MAX_ROWS + 1) errors.push(`Trop de lignes : maximum ${MAX_ROWS} par fichier.`);
       return;
@@ -160,7 +161,6 @@ export async function parseWorkbook(
     const problems: string[] = [];
     const date = isoDate(cells[0].value);
     if (!date) problems.push("date invalide (AAAA-MM-JJ)");
-    if (!description || description.length > 200) problems.push("description requise (200 caractères max)");
     const amount = amountCents(cells[2].value);
     if (amount === null) problems.push("montant invalide (ex. 45,90)");
 
@@ -168,14 +168,17 @@ export async function parseWorkbook(
     const payer = whoText ? members.find((m) => norm(m.name) === norm(whoText)) : members.find((m) => m.id === me.id);
     if (!payer) problems.push(`« ${whoText} » n'est pas un participant`);
 
-    const invoice = text(cells[6].value) || null;
-    if (invoice && invoice.length > 50) problems.push("numéro de facture trop long (50 max)");
-
     const kindText = norm(text(cells[5].value));
     let kind: ImportRow["kind"] = "expense";
     if (kindText === "remboursement" || kindText === "repayment") kind = "repayment";
+    else if (kindText === "solde de depart" || kindText === "solde" || kindText === "opening") kind = "opening";
     else if (kindText && kindText !== "depense" && kindText !== "expense")
-      problems.push("type invalide (Dépense ou Remboursement)");
+      problems.push("type invalide (Dépense, Remboursement ou Solde de départ)");
+
+    const description = kind === "opening" && !rawDescription ? "Solde de départ" : rawDescription;
+    if (!description || description.length > 200) problems.push("description requise (200 caractères max)");
+    const invoice = text(cells[6].value) || null;
+    if (invoice && invoice.length > 50) problems.push("numéro de facture trop long (50 max)");
 
     let pct = me.default_share_pct;
     const pctRaw = unwrap(cells[4].value);
@@ -198,7 +201,7 @@ export async function parseWorkbook(
       amount_cents: amount,
       paid_by: payer.id,
       paid_by_name: payer.name,
-      other_share_cents: kind === "repayment" ? amount : Math.round((amount * pct) / 100),
+      other_share_cents: kind !== "expense" ? amount : Math.round((amount * pct) / 100),
       invoice_number: invoice,
     });
   });

@@ -38,7 +38,7 @@ export function renderTex(s: Statement): string {
   const rows = s.txs
     .map(
       (t) =>
-        `${t.occurred_on} & ${texEscape(t.description)} & ${t.kind === "expense" ? "Dépense" : "Remb."} & ${texEscape(
+        `${t.occurred_on} & ${texEscape(t.description)} & ${t.kind === "expense" ? "Dépense" : t.kind === "opening" ? "Solde" : "Remb."} & ${texEscape(
           t.payer_name,
         )} & ${texMoney(t.amount_cents)} & ${texMoney(t.other_share_cents)} \\\\`,
     )

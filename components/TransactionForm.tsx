@@ -7,7 +7,7 @@ import FilePicker from "./FilePicker";
 type Member = { id: number; name: string };
 export type Initial = {
   id?: number;
-  kind: "expense" | "repayment";
+  kind: "expense" | "repayment" | "opening";
   description: string;
   amount: string;
   paid_by: number;
@@ -37,6 +37,7 @@ export default function TransactionForm({
           <select name="kind" value={kind} onChange={(e) => setKind(e.target.value as Initial["kind"])}>
             <option value="expense">Dépense</option>
             <option value="repayment">Remboursement</option>
+            <option value="opening">Solde de départ</option>
           </select>
         </label>
         <label>
@@ -46,7 +47,13 @@ export default function TransactionForm({
       </div>
       <label>
         Description
-        <input name="description" required maxLength={200} defaultValue={initial.description} />
+        <input
+          name="description"
+          required={kind !== "opening"}
+          maxLength={200}
+          defaultValue={initial.description}
+          placeholder={kind === "opening" ? "Solde de départ" : undefined}
+        />
       </label>
       <label>
         Numéro de facture <span className="muted">(facultatif)</span>
@@ -54,11 +61,11 @@ export default function TransactionForm({
       </label>
       <div className="row">
         <label>
-          Montant ($)
+          {kind === "opening" ? "Montant dû ($)" : "Montant ($)"}
           <input name="amount" inputMode="decimal" required defaultValue={initial.amount} placeholder="0,00" />
         </label>
         <label>
-          {kind === "repayment" ? "Qui rembourse ?" : "Payé par"}
+          {kind === "repayment" ? "Qui rembourse ?" : kind === "opening" ? "À qui doit-on cet argent ?" : "Payé par"}
           <select name="paid_by" defaultValue={initial.paid_by}>
             {members.map((m) => (
               <option key={m.id} value={m.id}>
@@ -81,6 +88,12 @@ export default function TransactionForm({
           />
           <span className="muted">100 = l&apos;autre vous doit tout, 50 = partage égal, 0 = dépense personnelle. (Valeur par défaut modifiable dans Paramètres.)</span>
         </label>
+      )}
+      {kind === "opening" && (
+        <p className="muted" style={{ margin: 0 }}>
+          Solde déjà existant avant l&apos;utilisation de l&apos;application : la personne choisie ci-dessus est celle à qui l&apos;autre
+          doit ce montant. Si chacun a un solde, ajoutez un solde de départ de chaque côté : ils se compensent.
+        </p>
       )}
       <FilePicker />
       {state?.error && <p className="error">{state.error}</p>}

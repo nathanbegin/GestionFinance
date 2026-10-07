@@ -4,6 +4,8 @@ import { formatMoney } from "@/lib/money";
 import type { Attachment, Member, Tx } from "@/lib/ledger";
 import DeleteButton from "./DeleteButton";
 
+const KIND_LABEL = { expense: "Dépense", repayment: "Remboursement", opening: "Solde de départ" } as const;
+
 export default function TxList({
   txs,
   userId,
@@ -34,11 +36,12 @@ export default function TxList({
             <div className="tx-main">
               <div className="tx-title">
                 {t.description}
-                <span className="badge">{t.kind === "expense" ? "Dépense" : "Remboursement"}</span>
+                <span className="badge">{KIND_LABEL[t.kind]}</span>
                 {t.invoice_number && <span className="badge">Fact. {t.invoice_number}</span>}
               </div>
               <div className="muted">
-                {t.kind === "expense" ? "Payé par" : "Remboursé par"} {t.paid_by === userId ? "vous" : t.payer_name} ·{" "}
+                {t.kind === "expense" ? "Payé par" : t.kind === "opening" ? "Dû à" : "Remboursé par"}{" "}
+                {t.paid_by === userId ? "vous" : t.payer_name} ·{" "}
                 {t.occurred_on}
                 {t.kind === "expense" &&
                   ` · part de ${t.paid_by === userId ? (other?.name ?? "l'autre") : "vous"} : ${formatMoney(t.other_share_cents)}`}

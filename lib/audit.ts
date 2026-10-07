@@ -42,7 +42,7 @@ export async function listAudit(ledgerId: number, limit = 200): Promise<AuditRow
   );
 }
 
-const KIND: Record<string, string> = { expense: "Dépense", repayment: "Remboursement" };
+const KIND: Record<string, string> = { expense: "Dépense", repayment: "Remboursement", opening: "Solde de départ" };
 
 function describe(s: Snapshot) {
   return `${KIND[s.kind] ?? s.kind} « ${s.description} » de ${formatMoney(s.amount_cents)} (payé par ${s.paid_by_name}, ${s.occurred_on})${s.invoice_number ? `, facture ${s.invoice_number}` : ""}`;

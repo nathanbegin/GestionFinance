@@ -96,7 +96,7 @@ export async function renderPdf(s: Statement): Promise<Uint8Array> {
     }
     text(t.occurred_on, col.date, 9);
     text(fit(t.description, font, 9, col.type - col.desc - 8), col.desc, 9);
-    text(t.kind === "expense" ? "Dépense" : "Remb.", col.type, 9);
+    text(t.kind === "expense" ? "Dépense" : t.kind === "opening" ? "Solde" : "Remb.", col.type, 9);
     text(fit(t.payer_name, font, 9, col.amount - col.payer - 55), col.payer, 9);
     right(formatMoney(t.amount_cents), col.amount);
     right(formatMoney(t.other_share_cents), col.share);

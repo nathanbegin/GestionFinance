@@ -46,6 +46,8 @@ const statements = [
   )`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS default_share_pct INTEGER NOT NULL DEFAULT 100 CHECK (default_share_pct BETWEEN 0 AND 100)`,
   `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS invoice_number TEXT`,
+  `ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_kind_check`,
+  `ALTER TABLE transactions ADD CONSTRAINT transactions_kind_check CHECK (kind IN ('expense', 'repayment', 'opening'))`,
   `CREATE TABLE IF NOT EXISTS attachments (
     id SERIAL PRIMARY KEY,
     ledger_id INTEGER NOT NULL REFERENCES ledgers(id),

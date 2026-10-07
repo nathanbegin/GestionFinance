@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { uploadPresigned } from "@vercel/blob/client";
 
 const MAX_FILES = 10;
 const MAX_TOTAL = 50_000_000;
 const MAX_SIDE = 2400;
 
-type Item = { name: string; size: number; type: string; pathname: string };
+/** Fichier joint : soit déjà envoyé dans Vercel Blob (pathname), soit encore sur l'appareil (file). */
+export type PickerItem = { key: string; name: string; size: number; type: string; pathname?: string; file?: File };
 
 /** Réduit une photo (max 2400 px, JPEG) pour accélérer l'envoi sur une connexion mobile. */
 async function shrink(file: File): Promise<File> {
@@ -31,12 +32,26 @@ const size = (n: number) => (n < 1e6 ? `${Math.max(1, Math.round(n / 1e3))} Ko` 
 
 /**
  * Les fichiers sont envoyés directement dans Vercel Blob dès leur sélection (barre de progression).
- * Le formulaire ne transmet ensuite que leur référence (champ « uploads »).
+ * Sans connexion (allowLocal), ils restent sur l'appareil et partent avec la transaction à la synchronisation.
  */
-export default function FilePicker({ ledgerId, onBusy }: { ledgerId: number; onBusy: (busy: boolean) => void }) {
-  const [items, setItems] = useState<Item[]>([]);
+export default function FilePicker({
+  ledgerId,
+  onBusy,
+  onItems,
+  allowLocal = false,
+}: {
+  ledgerId: number;
+  onBusy: (busy: boolean) => void;
+  onItems?: (items: PickerItem[]) => void;
+  allowLocal?: boolean;
+}) {
+  const [items, setItems] = useState<PickerItem[]>([]);
   const [msg, setMsg] = useState("");
   const [progress, setProgress] = useState<string | null>(null);
+
+  useEffect(() => {
+    onItems?.(items);
+  }, [items, onItems]);
 
   async function add(list: FileList | null, input: HTMLInputElement) {
     if (!list?.length) return;
@@ -55,15 +70,25 @@ export default function FilePicker({ ledgerId, onBusy }: { ledgerId: number; onB
         if (!file.type.startsWith("image/") && file.type !== "application/pdf")
           throw new Error(`« ${file.name} » : seuls les photos et les PDF sont acceptés.`);
 
-        const safe = file.name.replace(/[^\w.\- ]+/g, "_").slice(0, 80);
-        const blob = await uploadPresigned(`l${ledgerId}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${safe}`, file, {
-          access: "private",
-          handleUploadUrl: "/api/blob/upload",
-          contentType: file.type,
-          multipart: file.size > 10_000_000,
-          onUploadProgress: ({ percentage }) => setProgress(`Envoi de ${file.name} : ${Math.round(percentage)} %`),
-        });
-        current = [...current, { name: file.name, size: file.size, type: file.type, pathname: blob.pathname }];
+        let pathname: string | undefined;
+        if (!allowLocal || navigator.onLine) {
+          try {
+            const safe = file.name.replace(/[^\w.\- ]+/g, "_").slice(0, 80);
+            const blob = await uploadPresigned(`l${ledgerId}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${safe}`, file, {
+              access: "private",
+              handleUploadUrl: "/api/blob/upload",
+              contentType: file.type,
+              multipart: file.size > 10_000_000,
+              onUploadProgress: ({ percentage }) => setProgress(`Envoi de ${file.name} : ${Math.round(percentage)} %`),
+            });
+            pathname = blob.pathname;
+          } catch (err) {
+            if (!allowLocal) throw err;
+            // connexion perdue en cours d'envoi : le fichier reste sur l'appareil
+          }
+        }
+        const item: PickerItem = { key: crypto.randomUUID(), name: file.name, size: file.size, type: file.type, ...(pathname ? { pathname } : { file }) };
+        current = [...current, item];
         setItems(current);
       }
     } catch (e) {
@@ -77,7 +102,11 @@ export default function FilePicker({ ledgerId, onBusy }: { ledgerId: number; onB
   return (
     <div className="stack" style={{ gap: 8 }}>
       <span style={{ fontSize: "0.9rem", fontWeight: 500 }}>Pièces jointes (photo ou PDF)</span>
-      <input type="hidden" name="uploads" value={JSON.stringify(items.map(({ pathname, name }) => ({ pathname, name })))} />
+      <input
+        type="hidden"
+        name="uploads"
+        value={JSON.stringify(items.filter((i) => i.pathname).map(({ pathname, name }) => ({ pathname, name })))}
+      />
       <div className="row" style={{ gap: 8 }}>
         <label className="button-like">
           📷 Prendre une photo
@@ -91,9 +120,10 @@ export default function FilePicker({ ledgerId, onBusy }: { ledgerId: number; onB
       {progress && <span className="muted">{progress}</span>}
       {msg && <span className="error">{msg}</span>}
       {items.map((f, i) => (
-        <div className="file-chip" key={f.pathname}>
+        <div className="file-chip" key={f.key}>
           <span>
             {f.type === "application/pdf" ? "📄" : "🖼️"} {f.name} <span className="muted">({size(f.size)})</span>
+            {f.file && <span className="muted"> · sur l&apos;appareil, envoyé à la synchronisation</span>}
           </span>
           <button type="button" className="link danger" onClick={() => setItems(items.filter((_, j) => j !== i))}>
             Retirer

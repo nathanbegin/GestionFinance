@@ -6,6 +6,7 @@ import Nav from "@/components/Nav";
 import { NameForm, PasswordForm, ShareForm } from "@/components/SettingsForms";
 import { AddSupplierForm, AutoLinkButton, SupplierList } from "@/components/SupplierForms";
 import { listSuppliers } from "@/lib/suppliers";
+import PushSettings from "@/components/PushSettings";
 
 export default async function SettingsPage() {
   const user = await requireUser();
@@ -57,6 +58,9 @@ export default async function SettingsPage() {
           <AddSupplierForm />
         </div>
         <AutoLinkButton />
+
+        <h2>Notifications</h2>
+        <PushSettings />
 
         <h2>Profil</h2>
         <NameForm name={user.name} />

@@ -6,6 +6,9 @@ Petite application web pour suivre les dépenses et remboursements entre deux pe
 - Dépenses et remboursements
 - Solde automatique entre les deux participants
 - Connexion par courriel + mot de passe, invitation de l'autre personne par code
+- Application installable (PWA) : icône sur l'écran d'accueil, plein écran, page de secours hors ligne
+- Saisie hors ligne : une nouvelle transaction est d'abord enregistrée sur l'appareil (IndexedDB), puis envoyée automatiquement au retour du réseau (page « Liste d'attente » + bouton de synchronisation) ; l'envoi est idempotent (aucun doublon)
+- Notifications push (Paramètres) quand une autre personne ajoute, modifie ou supprime une transaction ; les clés VAPID sont dérivées de `AUTH_SECRET` (rien d'autre à configurer)
 - Historique complet des modifications (qui a fait quoi, quand, avant → après)
 - Les suppressions sont logiques : une transaction supprimée reste visible dans l'historique
 - Export PDF et export `.tex` (compilable avec pdflatex / lualatex / xelatex)

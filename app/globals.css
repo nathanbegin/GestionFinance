@@ -227,3 +227,16 @@ label.split-row input { width: 90px; text-align: right; }
 .people-list label.chip { width: 100%; border-radius: 10px; justify-content: space-between; }
 .people-list label.chip span.who { flex: 1; }
 .settle { margin: 4px 0 0; padding-left: 18px; }
+
+/* ----- Hors ligne, liste d'attente, notifications ----- */
+.queue-chip {
+  flex: none; font-size: 0.8rem; font-weight: 600; text-decoration: none; padding: 4px 10px; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); white-space: nowrap;
+}
+.queue-chip.off { background: color-mix(in srgb, #f5b83d 28%, transparent); color: var(--text); }
+.queue-chip.err { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+.card.notice { margin-bottom: 12px; border-color: var(--good); }
+@media (max-width: 480px) {
+  .brand span { display: none; }
+  .topbar-inner { gap: 8px; }
+}

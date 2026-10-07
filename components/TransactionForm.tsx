@@ -1,10 +1,13 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useActionState, useState } from "react";
 import { saveTransaction } from "@/app/actions";
+import { addItem, deleteItem, flushQueue, listItems, newId, type QueueItem } from "@/lib/offlineQueue";
 import type { Supplier } from "@/lib/suppliers";
 import { matchSuppliers } from "@/lib/supplierMatch";
-import FilePicker from "./FilePicker";
+import FilePicker, { type PickerItem } from "./FilePicker";
 import SupplierLogo from "./SupplierLogo";
 
 type Member = { id: number; name: string };
@@ -24,19 +27,59 @@ export type Initial = {
   counterpart: number | null;
 };
 
-export default function TransactionForm({
-  members,
-  initial,
-  submitLabel,
-  ledgerId,
-  suppliers,
-}: {
+type Props = {
   members: Member[];
   initial: Initial;
   submitLabel: string;
   ledgerId: number;
   suppliers: Supplier[];
-}) {
+  /** Utilisateur et compte courants : nécessaires pour la file d'attente hors ligne. */
+  userId: number;
+  ledgerLabel: string;
+};
+
+/**
+ * Nouvelle transaction : enregistrée d'abord sur l'appareil puis envoyée (immédiatement si la connexion le permet),
+ * pour ne jamais perdre une saisie. Modification : action serveur habituelle (connexion requise).
+ */
+export default function TransactionForm(props: Props) {
+  const [nonce, setNonce] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
+  return (
+    <>
+      {notice && (
+        <div className="card notice" role="status">
+          ✓ {notice} <Link href="/attente">Voir la liste d&apos;attente</Link>
+        </div>
+      )}
+      <FormInner
+        key={nonce}
+        {...props}
+        onQueued={(msg) => {
+          setNotice(msg);
+          setNonce((n) => n + 1);
+          window.scrollTo({ top: 0 });
+        }}
+      />
+    </>
+  );
+}
+
+function FormInner({
+  members,
+  initial,
+  submitLabel,
+  ledgerId,
+  suppliers,
+  userId,
+  ledgerLabel,
+  onQueued,
+}: Props & { onQueued: (message: string) => void }) {
+  const router = useRouter();
+  const isNew = !initial.id;
+  const [items, setItems] = useState<PickerItem[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [state, action, pending] = useActionState(saveTransaction, undefined);
   const [kind, setKind] = useState(initial.kind);
   const [uploading, setUploading] = useState(false);
@@ -86,8 +129,71 @@ export default function TransactionForm({
     setAuto(new Set([...auto].filter((a) => a !== id)));
   }
 
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    if (!isNew) return; // modification : action serveur habituelle
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const get = (k: string) => String(fd.get(k) ?? "");
+    const pctsOut: Record<number, string> = {};
+    for (const m of members) pctsOut[m.id] = get(`pct_${m.id}`);
+    const item: QueueItem = {
+      id: newId(),
+      userId,
+      ledgerId,
+      ledgerLabel,
+      createdAt: Date.now(),
+      fields: {
+        kind: get("kind"),
+        description: get("description"),
+        amount: get("amount"),
+        paid_by: Number(get("paid_by")),
+        occurred_on: get("occurred_on"),
+        share_pct: get("share_pct"),
+        pcts: pctsOut,
+        counterpart: Number(get("counterpart")) || null,
+        invoice_number: get("invoice_number"),
+        suppliers: fd.getAll("suppliers").map(Number),
+      },
+      uploads: items.filter((i) => i.pathname).map((i) => ({ pathname: i.pathname!, name: i.name })),
+      files: items.filter((i) => i.file).map((i) => i.file!),
+      status: "pending",
+      attempts: 0,
+    };
+    setLocalError(null);
+    setSaving(true);
+    try {
+      await addItem(item);
+    } catch {
+      setLocalError("Impossible d'enregistrer sur l'appareil (stockage indisponible).");
+      setSaving(false);
+      return;
+    }
+    if (navigator.onLine) {
+      await flushQueue(userId, item.id);
+      const left = (await listItems(userId)).find((i) => i.id === item.id);
+      if (!left) {
+        router.push("/"); // envoyée : retour à l'accueil
+        router.refresh();
+        return;
+      }
+      if (left.status === "error") {
+        // refusée par le serveur (champ invalide…) : on la retire de la file et on laisse corriger le formulaire
+        await deleteItem(item.id);
+        setLocalError(left.error ?? "Transaction refusée.");
+        setSaving(false);
+        return;
+      }
+    }
+    setSaving(false);
+    onQueued(
+      navigator.onLine
+        ? "Enregistrée sur l'appareil ; l'envoi sera réessayé automatiquement."
+        : "Enregistrée sur l'appareil ; elle sera envoyée dès que la connexion reviendra.",
+    );
+  }
+
   return (
-    <form action={action} className="card stack">
+    <form action={action} onSubmit={onSubmit} className="card stack">
       {initial.id && <input type="hidden" name="id" value={initial.id} />}
       <div className="row">
         <label>
@@ -215,9 +321,9 @@ export default function TransactionForm({
           </label>
         ))}
       </fieldset>
-      <FilePicker ledgerId={ledgerId} onBusy={setUploading} />
-      {state?.error && <p className="error">{state.error}</p>}
-      <button disabled={pending || uploading}>{uploading ? "Envoi des fichiers…" : submitLabel}</button>
+      <FilePicker ledgerId={ledgerId} onBusy={setUploading} onItems={setItems} allowLocal={isNew} />
+      {(localError ?? state?.error) && <p className="error">{localError ?? state?.error}</p>}
+      <button disabled={pending || uploading || saving}>{uploading ? "Envoi des fichiers…" : saving ? "Enregistrement…" : submitLabel}</button>
     </form>
   );
 }

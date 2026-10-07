@@ -113,6 +113,17 @@ const statements = [
      AND NOT EXISTS (SELECT 1 FROM transaction_shares s WHERE s.transaction_id = t.id)
      AND (SELECT count(*) FROM ledger_members x WHERE x.ledger_id = t.ledger_id) = 2
    ON CONFLICT DO NOTHING`,
+  // --- Synchronisation hors ligne et notifications ---
+  `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS client_id TEXT`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_client_id ON transactions(ledger_id, client_id) WHERE client_id IS NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id)`,
 ];
 
 for (const s of statements) {

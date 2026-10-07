@@ -3,6 +3,7 @@
 import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { q, qTransaction } from "@/lib/db";
 import { createSession, destroySession, requireUser, setActiveLedger, type User } from "@/lib/auth";
@@ -13,6 +14,8 @@ import { computeShares, type Share } from "@/lib/shares";
 import { MAX_ROWS, parseWorkbook } from "@/lib/importXlsx";
 import { insertAttachments, prepareUploads, type Prepared } from "@/lib/attachments";
 import { copySuppliers, listSuppliers, readLogo, seedSuppliers } from "@/lib/suppliers";
+import { saveTransactionCore } from "@/lib/transactions";
+import { notifyLedger } from "@/lib/push";
 import { matchSuppliers, splitKeywords } from "@/lib/supplierMatch";
 
 export type FormState = { error?: string; ok?: string; details?: string[] } | undefined;
@@ -118,27 +121,6 @@ export async function switchAccount(f: FormData) {
 
 /* ---------- Transactions ---------- */
 
-async function setShares(txId: number, shares: Share[]) {
-  await q("DELETE FROM transaction_shares WHERE transaction_id = $1", [txId]);
-  if (shares.length)
-    await q(
-      "INSERT INTO transaction_shares (transaction_id, user_id, share_cents) SELECT $1, u, s FROM unnest($2::int[], $3::int[]) AS t(u, s)",
-      [txId, shares.map((x) => x.user_id), shares.map((x) => x.share_cents)],
-    );
-}
-
-async function setSuppliers(txId: number, ids: number[]) {
-  await q("DELETE FROM transaction_suppliers WHERE transaction_id = $1", [txId]);
-  if (ids.length)
-    await q("INSERT INTO transaction_suppliers (transaction_id, supplier_id) SELECT $1, unnest($2::int[])", [txId, ids]);
-}
-
-async function attach(user: User, txId: number, description: string, items: Prepared[]) {
-  await insertAttachments(user.ledger_id, txId, user.id, items);
-  for (const a of items)
-    await logAudit(user.ledger_id, user.id, "attachment.add", txId, { filename: a.filename, description });
-}
-
 export async function deleteAttachment(f: FormData) {
   const user = await requireUser();
   const id = Number(str(f, "id"));
@@ -161,101 +143,24 @@ export async function deleteAttachment(f: FormData) {
 export async function saveTransaction(_: FormState, f: FormData): Promise<FormState> {
   const user = await requireUser();
   const members = await getMembers(user.ledger_id);
-  if (members.length < 2) return { error: "Il faut au moins deux participants dans ce compte." };
+  const pcts: Record<number, string> = {};
+  for (const m of members) pcts[m.id] = str(f, `pct_${m.id}`);
 
-  const idRaw = str(f, "id");
-  const kind = str(f, "kind");
-  const description = str(f, "description") || (str(f, "kind") === "opening" ? "Solde de départ" : "");
-  const amount = parseAmount(str(f, "amount"));
-  const paidBy = Number(str(f, "paid_by"));
-  const date = str(f, "occurred_on");
-  const pct = Number(str(f, "share_pct") || String(user.default_share_pct));
-  const invoice = str(f, "invoice_number") || null;
-  const uploadsRaw = String(f.get("uploads") ?? "");
-  const wanted = f.getAll("suppliers").map((x) => Number(x));
-  const pcts: Record<number, number> = {};
-  for (const m of members) pcts[m.id] = Number(str(f, `pct_${m.id}`) || "NaN");
-
-  if (kind !== "expense" && kind !== "repayment" && kind !== "opening") return { error: "Type invalide." };
-  if (!description || description.length > 200) return { error: "Description requise (200 caractères max)." };
-  if (amount === null) return { error: "Montant invalide (ex. : 45,90)." };
-  const payer = members.find((m) => m.id === paidBy);
-  if (!payer) return { error: "Payeur invalide." };
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) return { error: "Date invalide." };
-  if (invoice && invoice.length > 50) return { error: "Numéro de facture : 50 caractères max." };
-  const split = computeShares({
-    kind,
-    amountCents: amount,
-    payerId: paidBy,
-    memberIds: members.map((m) => m.id),
-    otherPct: pct,
+  const res = await saveTransactionCore(user, user.ledger_id, {
+    id: str(f, "id") ? Number(str(f, "id")) : undefined,
+    kind: str(f, "kind"),
+    description: str(f, "description"),
+    amount: str(f, "amount"),
+    paid_by: Number(str(f, "paid_by")),
+    occurred_on: str(f, "occurred_on"),
+    share_pct: str(f, "share_pct"),
     pcts,
     counterpart: Number(str(f, "counterpart")) || null,
+    invoice_number: str(f, "invoice_number"),
+    suppliers: f.getAll("suppliers").map((x) => Number(x)),
+    uploads: String(f.get("uploads") ?? ""),
   });
-  if ("error" in split) return { error: split.error };
-  const shares = split.shares;
-  const nameOf = (id: number) => members.find((m) => m.id === id)?.name ?? "?";
-  const splitText = (list: Share[]) =>
-    members.length > 2 ? list.map((x) => `${nameOf(x.user_id)} ${formatMoney(x.share_cents)}`).join(", ") || "(aucune part)" : undefined;
-
-  const prep = await prepareUploads(user.ledger_id, uploadsRaw);
-  if ("error" in prep) return { error: prep.error };
-
-  const allSuppliers = await listSuppliers(user.ledger_id);
-  const supplierIds = allSuppliers.filter((s) => wanted.includes(s.id)).map((s) => s.id);
-  const namesOf = (ids: number[]) => allSuppliers.filter((s) => ids.includes(s.id)).map((s) => s.name).join(", ");
-
-  const otherShare = shares.reduce((sum, x) => sum + x.share_cents, 0);
-  const after: Snapshot = {
-    kind,
-    description,
-    amount_cents: amount,
-    paid_by_name: payer.name,
-    other_share_cents: otherShare,
-    occurred_on: date,
-    invoice_number: invoice,
-    suppliers: namesOf(supplierIds),
-    split: splitText(shares),
-  };
-
-  if (idRaw) {
-    const id = Number(idRaw);
-    const before = await getTransaction(user.ledger_id, id);
-    if (!before) return { error: "Transaction introuvable." };
-    await q(
-      `UPDATE transactions SET kind=$1, paid_by=$2, amount_cents=$3, other_share_cents=$4,
-         description=$5, occurred_on=$6, invoice_number=$7, updated_at=now()
-       WHERE id=$8 AND ledger_id=$9 AND deleted_at IS NULL`,
-      [kind, paidBy, amount, otherShare, description, date, invoice, id, user.ledger_id],
-    );
-    await logAudit(user.ledger_id, user.id, "transaction.update", id, {
-      before: {
-        kind: before.kind,
-        description: before.description,
-        amount_cents: before.amount_cents,
-        paid_by_name: before.payer_name,
-        other_share_cents: before.other_share_cents,
-        occurred_on: before.occurred_on,
-        invoice_number: before.invoice_number,
-        suppliers: namesOf(before.supplier_ids),
-        split: splitText(before.shares),
-      } satisfies Snapshot,
-      after,
-    });
-    await setSuppliers(id, supplierIds);
-    await setShares(id, shares);
-    await attach(user, id, description, prep.prepared);
-  } else {
-    const rows = await q<{ id: number }>(
-      `INSERT INTO transactions (ledger_id, kind, paid_by, amount_cents, other_share_cents, description, occurred_on, created_by, invoice_number)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-      [user.ledger_id, kind, paidBy, amount, otherShare, description, date, user.id, invoice],
-    );
-    await logAudit(user.ledger_id, user.id, "transaction.create", rows[0].id, { after });
-    await setSuppliers(rows[0].id, supplierIds);
-    await setShares(rows[0].id, shares);
-    await attach(user, rows[0].id, description, prep.prepared);
-  }
+  if ("error" in res) return { error: res.error };
 
   revalidatePath("/", "layout");
   revalidatePath("/historique");
@@ -282,6 +187,14 @@ export async function deleteTransaction(f: FormData) {
   });
   revalidatePath("/", "layout");
   revalidatePath("/historique");
+  after(() =>
+    notifyLedger(user.ledger_id, user.id, {
+      title: "Gestion des finances",
+      body: `${user.name} a supprimé « ${before.description} » (${formatMoney(before.amount_cents)})`,
+      url: "/transactions",
+      tag: `tx-${id}`,
+    }),
+  );
 }
 
 /* ---------- Importation en lot ---------- */

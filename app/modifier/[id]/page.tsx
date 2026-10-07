@@ -34,6 +34,8 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
           members={members}
           submitLabel="Enregistrer les modifications"
           ledgerId={user.ledger_id}
+          userId={user.id}
+          ledgerLabel=""
           suppliers={suppliers}
           initial={{
             id: tx.id,

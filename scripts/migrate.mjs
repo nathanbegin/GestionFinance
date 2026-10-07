@@ -44,6 +44,7 @@ const statements = [
     details JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS default_share_pct INTEGER NOT NULL DEFAULT 100 CHECK (default_share_pct BETWEEN 0 AND 100)`,
   `CREATE INDEX IF NOT EXISTS idx_tx_ledger ON transactions(ledger_id, occurred_on)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_ledger ON audit_log(ledger_id, created_at DESC)`,
 ];

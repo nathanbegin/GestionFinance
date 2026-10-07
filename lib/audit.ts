@@ -27,7 +27,7 @@ export type AuditRow = {
   id: number;
   action: string;
   transaction_id: number | null;
-  details: { before?: Snapshot; after?: Snapshot; name?: string } | null;
+  details: { before?: Snapshot; after?: Snapshot; name?: string; default_share_pct?: number } | null;
   created_at: Date;
   user_name: string;
 };
@@ -78,6 +78,8 @@ export function auditText(row: AuditRow): { verb: string; lines: string[] } {
     case "ledger.join":
       return { verb: "a rejoint le compte partagé", lines: [] };
     case "profile.update":
+      if (d?.default_share_pct !== undefined)
+        return { verb: "a changé sa répartition par défaut", lines: [`Nouvelle valeur : ${d.default_share_pct} %`] };
       return { verb: "a changé son nom", lines: d?.name ? [`Nouveau nom : ${d.name}`] : [] };
     case "password.change":
       return { verb: "a changé son mot de passe", lines: [] };

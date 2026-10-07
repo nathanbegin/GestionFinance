@@ -89,7 +89,7 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
   const amount = parseAmount(str(f, "amount"));
   const paidBy = Number(str(f, "paid_by"));
   const date = str(f, "occurred_on");
-  const pct = Number(str(f, "share_pct") || "50");
+  const pct = Number(str(f, "share_pct") || String(user.default_share_pct));
 
   if (kind !== "expense" && kind !== "repayment") return { error: "Type invalide." };
   if (!description || description.length > 200) return { error: "Description requise (200 caractères max)." };
@@ -175,6 +175,16 @@ export async function updateName(_: FormState, f: FormData): Promise<FormState> 
   await logAudit(user.ledger_id, user.id, "profile.update", null, { name });
   revalidatePath("/", "layout");
   return { ok: "Nom mis à jour." };
+}
+
+export async function updateDefaultShare(_: FormState, f: FormData): Promise<FormState> {
+  const user = await requireUser();
+  const pct = Number(str(f, "default_share_pct"));
+  if (!Number.isInteger(pct) || pct < 0 || pct > 100) return { error: "La répartition doit être un entier entre 0 et 100 %." };
+  await q("UPDATE users SET default_share_pct = $1 WHERE id = $2", [pct, user.id]);
+  await logAudit(user.ledger_id, user.id, "profile.update", null, { default_share_pct: pct });
+  revalidatePath("/", "layout");
+  return { ok: "Répartition par défaut mise à jour." };
 }
 
 export async function changePassword(_: FormState, f: FormData): Promise<FormState> {

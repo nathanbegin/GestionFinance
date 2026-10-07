@@ -83,3 +83,8 @@ a.button {
 .audit ul { margin: 4px 0 0; padding-left: 18px; color: var(--muted); font-size: 0.9rem; }
 code.invite { font-size: 1.2rem; letter-spacing: 0.1em; font-weight: 700; }
 .center { max-width: 420px; margin: 40px auto; padding: 0 16px; }
+.toast {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 10;
+  background: var(--text); color: var(--card); padding: 10px 16px; border-radius: 10px;
+  font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+}

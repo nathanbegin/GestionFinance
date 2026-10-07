@@ -73,7 +73,7 @@ export default function TransactionForm({
             step={1}
             defaultValue={initial.share_pct}
           />
-          <span className="muted">50 = partage égal, 100 = avance complète, 0 = dépense personnelle.</span>
+          <span className="muted">100 = l&apos;autre vous doit tout, 50 = partage égal, 0 = dépense personnelle. (Valeur par défaut modifiable dans Paramètres.)</span>
         </label>
       )}
       {state?.error && <p className="error">{state.error}</p>}

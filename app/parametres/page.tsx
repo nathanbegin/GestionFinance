@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { getMembers } from "@/lib/ledger";
 import { q } from "@/lib/db";
 import Nav from "@/components/Nav";
-import { NameForm, PasswordForm } from "@/components/SettingsForms";
+import { NameForm, PasswordForm, ShareForm } from "@/components/SettingsForms";
 
 export default async function SettingsPage() {
   const user = await requireUser();
@@ -41,6 +41,9 @@ export default async function SettingsPage() {
 
         <h2>Profil</h2>
         <NameForm name={user.name} />
+
+        <h2>Répartition par défaut</h2>
+        <ShareForm pct={user.default_share_pct} />
 
         <h2>Mot de passe</h2>
         <PasswordForm />

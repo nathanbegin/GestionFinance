@@ -65,7 +65,7 @@ export default async function Home() {
                 description: "",
                 amount: "",
                 paid_by: user.id,
-                share_pct: 50,
+                share_pct: user.default_share_pct,
                 occurred_on: todayLocal(),
               }}
             />

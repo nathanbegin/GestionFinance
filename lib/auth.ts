@@ -11,7 +11,7 @@ function key() {
   return new TextEncoder().encode(s);
 }
 
-export type User = { id: number; ledger_id: number; email: string; name: string };
+export type User = { id: number; ledger_id: number; email: string; name: string; default_share_pct: number };
 
 export async function createSession(userId: number) {
   const token = await new SignJWT({ uid: userId })
@@ -37,7 +37,7 @@ export async function getUser(): Promise<User | null> {
   try {
     const { payload } = await jwtVerify(token, key());
     const rows = await q<User>(
-      "SELECT id, ledger_id, email, name FROM users WHERE id = $1",
+      "SELECT id, ledger_id, email, name, default_share_pct FROM users WHERE id = $1",
       [payload.uid],
     );
     return rows[0] ?? null;

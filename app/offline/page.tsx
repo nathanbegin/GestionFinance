@@ -1,4 +1,5 @@
 import Logo from "@/components/Logo";
+import OfflineRetry from "@/components/OfflineRetry";
 
 export const metadata = { title: "Hors ligne" };
 
@@ -19,10 +20,8 @@ export default function OfflinePage() {
         <a className="button" href="/attente">
           Voir la liste d&apos;attente
         </a>
-        <a className="button" href="/">
-          Réessayer
-        </a>
       </div>
+      <OfflineRetry />
     </main>
   );
 }

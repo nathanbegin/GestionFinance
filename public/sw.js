@@ -1,5 +1,5 @@
 /* Service worker de « Gestion des finances » : installation, accès hors ligne limité, notifications. */
-const VERSION = "v1";
+const VERSION = "v2";
 const STATIC_CACHE = `static-${VERSION}`;
 const PAGES_CACHE = `pages-${VERSION}`;
 // Seules ces pages sont conservées pour une utilisation sans réseau (saisie d'une transaction + liste d'attente).
@@ -8,11 +8,19 @@ const FALLBACK = "/offline";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches
-      .open(PAGES_CACHE)
-      .then((cache) => cache.add(new Request(FALLBACK, { cache: "reload" })))
-      .catch(() => {})
-      .then(() => self.skipWaiting()),
+    (async () => {
+      try {
+        const res = await fetch(new Request(FALLBACK, { cache: "reload" }));
+        if (res.ok) {
+          const cache = await caches.open(PAGES_CACHE);
+          await cache.put(FALLBACK, res.clone());
+          await cacheAssetsOf(await res.text());
+        }
+      } catch (e) {
+        /* installation hors ligne : la page de secours sera conservée à la prochaine mise à jour */
+      }
+      await self.skipWaiting();
+    })(),
   );
 });
 
@@ -89,7 +97,14 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     (async () => {
       try {
-        const res = await (keep ? withTimeout(fetch(req), 8000) : fetch(req));
+        let res;
+        try {
+          res = await (keep ? withTimeout(fetch(req), 8000) : fetch(req));
+        } catch (first) {
+          if (!self.navigator.onLine) throw first;
+          await new Promise((r) => setTimeout(r, 1500)); // connexion en cours de rétablissement : un nouvel essai
+          res = await (keep ? withTimeout(fetch(req), 8000) : fetch(req));
+        }
         // On ne conserve que les pages normales (pas les redirections vers /login) de la liste autorisée
         if (keep && res.ok && !res.redirected) {
           const copy = res.clone();

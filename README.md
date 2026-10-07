@@ -1,8 +1,9 @@
 # Comptes partagés
 
-Petite application web pour suivre les dépenses et remboursements entre deux personnes.
+Petite application web pour suivre les dépenses et remboursements entre deux personnes ou en groupe.
 
-- Dépenses (avec part due par l'autre personne, en %) et remboursements
+- Plusieurs comptes de dépenses : à deux (part due par l'autre, en %) ou de groupe (répartition en % entre tous les participants, définie à chaque transaction). Le créateur choisit les participants parmi les personnes inscrites.
+- Dépenses et remboursements
 - Solde automatique entre les deux participants
 - Connexion par courriel + mot de passe, invitation de l'autre personne par code
 - Historique complet des modifications (qui a fait quoi, quand, avant → après)
@@ -28,8 +29,8 @@ Le solde de chacun est la somme de ce qu'on lui doit moins ce qu'il doit.
    npm install
    npm run db:migrate
    ```
-5. Déployer. Créer votre compte sur `/register` (laisser le code vide), puis donner le code d'invitation affiché à l'autre personne.
-6. Une fois les deux comptes créés, définir `ALLOW_NEW_LEDGERS=false` dans Vercel pour empêcher quiconque de créer un nouveau compte partagé.
+5. Déployer. Créer votre compte sur `/register` (laisser le code vide), puis ouvrir **Comptes** pour créer un compte de dépenses avec une ou plusieurs personnes déjà inscrites.
+6. Une fois tout le monde inscrit, définir `ALLOW_NEW_LEDGERS=false` dans Vercel pour interdire les inscriptions sans code d'invitation.
 
 ## Développement local
 

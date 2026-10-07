@@ -5,13 +5,14 @@ import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { q, qTransaction } from "@/lib/db";
-import { createSession, destroySession, requireUser, type User } from "@/lib/auth";
+import { createSession, destroySession, requireUser, setActiveLedger, type User } from "@/lib/auth";
 import { getMembers, getTransaction, listTransactions } from "@/lib/ledger";
 import { logAudit, type Snapshot } from "@/lib/audit";
-import { parseAmount } from "@/lib/money";
+import { formatMoney, parseAmount } from "@/lib/money";
+import { computeShares, type Share } from "@/lib/shares";
 import { MAX_ROWS, parseWorkbook } from "@/lib/importXlsx";
 import { insertAttachments, prepareUploads, type Prepared } from "@/lib/attachments";
-import { listSuppliers, readLogo, seedSuppliers } from "@/lib/suppliers";
+import { copySuppliers, listSuppliers, readLogo, seedSuppliers } from "@/lib/suppliers";
 import { matchSuppliers, splitKeywords } from "@/lib/supplierMatch";
 
 export type FormState = { error?: string; ok?: string; details?: string[] } | undefined;
@@ -33,34 +34,31 @@ export async function register(_: FormState, f: FormData): Promise<FormState> {
   const existing = await q("SELECT 1 FROM users WHERE email = $1", [email]);
   if (existing.length) return { error: "Ce courriel est déjà utilisé." };
 
-  let ledgerId: number;
-  let joined = false;
+  let joinLedger: number | null = null;
   if (invite) {
     const rows = await q<{ id: number }>("SELECT id FROM ledgers WHERE invite_code = $1", [invite]);
     if (!rows.length) return { error: "Code d'invitation invalide." };
-    ledgerId = rows[0].id;
-    const count = await q<{ n: number }>("SELECT count(*)::int AS n FROM users WHERE ledger_id = $1", [ledgerId]);
-    if (count[0].n >= 2) return { error: "Ce compte partagé a déjà deux participants." };
-    joined = true;
-  } else {
-    if (process.env.ALLOW_NEW_LEDGERS === "false")
-      return { error: "La création de nouveaux comptes est désactivée. Utilisez un code d'invitation." };
-    const code = randomBytes(5).toString("hex").toUpperCase();
-    const rows = await q<{ id: number }>("INSERT INTO ledgers (invite_code) VALUES ($1) RETURNING id", [code]);
-    ledgerId = rows[0].id;
-    await seedSuppliers(ledgerId);
+    joinLedger = rows[0].id;
+    const count = await q<{ n: number }>("SELECT count(*)::int AS n FROM ledger_members WHERE ledger_id = $1", [joinLedger]);
+    if (count[0].n >= 2) return { error: "Ce code d'invitation n'est plus utilisable : le compte a déjà ses participants." };
+  } else if (process.env.ALLOW_NEW_LEDGERS === "false") {
+    return { error: "Les inscriptions sans code d'invitation sont désactivées." };
   }
 
   const hash = await bcrypt.hash(password, 10);
   const users = await q<{ id: number }>(
     "INSERT INTO users (ledger_id, email, name, password_hash) VALUES ($1, $2, $3, $4) RETURNING id",
-    [ledgerId, email, name, hash],
+    [joinLedger, email, name, hash],
   );
   const userId = users[0].id;
-  await logAudit(ledgerId, userId, joined ? "ledger.join" : "ledger.create", null);
+  if (joinLedger) {
+    await q("INSERT INTO ledger_members (ledger_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", [joinLedger, userId]);
+    await logAudit(joinLedger, userId, "ledger.join", null);
+  }
 
   await createSession(userId);
-  redirect("/");
+  if (joinLedger) await setActiveLedger(joinLedger);
+  redirect(joinLedger ? "/" : "/comptes");
 }
 
 export async function login(_: FormState, f: FormData): Promise<FormState> {
@@ -81,7 +79,53 @@ export async function logout() {
   redirect("/login");
 }
 
+/* ---------- Comptes de dépenses ---------- */
+
+export async function createAccount(_: FormState, f: FormData): Promise<FormState> {
+  const user = await requireUser({ allowNone: true });
+  const ids = Array.from(new Set(f.getAll("members").map((x) => Number(x)).filter((n) => Number.isInteger(n) && n !== user.id)));
+  const name = str(f, "name");
+  if (!ids.length) return { error: "Choisissez au moins une personne." };
+  if (ids.length > 15) return { error: "Un groupe est limité à 16 personnes." };
+  if (name.length > 60) return { error: "Nom du compte : 60 caractères max." };
+  const found = await q<{ id: number }>("SELECT id FROM users WHERE id = ANY($1::int[])", [ids]);
+  if (found.length !== ids.length) return { error: "Une des personnes choisies n'existe plus." };
+
+  const code = randomBytes(5).toString("hex").toUpperCase();
+  const rows = await q<{ id: number }>(
+    "INSERT INTO ledgers (invite_code, name, created_by) VALUES ($1, $2, $3) RETURNING id",
+    [code, name || null, user.id],
+  );
+  const ledgerId = rows[0].id;
+  await q("INSERT INTO ledger_members (ledger_id, user_id) SELECT $1, unnest($2::int[])", [ledgerId, [user.id, ...ids]]);
+  // Fournisseurs : on repart de ceux du compte actif (avec leurs logos), sinon des fournisseurs par défaut
+  if (user.ledger_id) await copySuppliers(user.ledger_id, ledgerId);
+  else await seedSuppliers(ledgerId);
+  await logAudit(ledgerId, user.id, "ledger.create", null);
+
+  await setActiveLedger(ledgerId);
+  revalidatePath("/", "layout");
+  redirect("/");
+}
+
+export async function switchAccount(f: FormData) {
+  const user = await requireUser({ allowNone: true });
+  const id = Number(str(f, "ledger"));
+  if (user.ledgers.includes(id)) await setActiveLedger(id);
+  revalidatePath("/", "layout");
+  redirect("/");
+}
+
 /* ---------- Transactions ---------- */
+
+async function setShares(txId: number, shares: Share[]) {
+  await q("DELETE FROM transaction_shares WHERE transaction_id = $1", [txId]);
+  if (shares.length)
+    await q(
+      "INSERT INTO transaction_shares (transaction_id, user_id, share_cents) SELECT $1, u, s FROM unnest($2::int[], $3::int[]) AS t(u, s)",
+      [txId, shares.map((x) => x.user_id), shares.map((x) => x.share_cents)],
+    );
+}
 
 async function setSuppliers(txId: number, ids: number[]) {
   await q("DELETE FROM transaction_suppliers WHERE transaction_id = $1", [txId]);
@@ -117,7 +161,7 @@ export async function deleteAttachment(f: FormData) {
 export async function saveTransaction(_: FormState, f: FormData): Promise<FormState> {
   const user = await requireUser();
   const members = await getMembers(user.ledger_id);
-  if (members.length !== 2) return { error: "Le deuxième participant doit d'abord rejoindre le compte." };
+  if (members.length < 2) return { error: "Il faut au moins deux participants dans ce compte." };
 
   const idRaw = str(f, "id");
   const kind = str(f, "kind");
@@ -129,6 +173,8 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
   const invoice = str(f, "invoice_number") || null;
   const uploadsRaw = String(f.get("uploads") ?? "");
   const wanted = f.getAll("suppliers").map((x) => Number(x));
+  const pcts: Record<number, number> = {};
+  for (const m of members) pcts[m.id] = Number(str(f, `pct_${m.id}`) || "NaN");
 
   if (kind !== "expense" && kind !== "repayment" && kind !== "opening") return { error: "Type invalide." };
   if (!description || description.length > 200) return { error: "Description requise (200 caractères max)." };
@@ -137,8 +183,20 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
   if (!payer) return { error: "Payeur invalide." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) return { error: "Date invalide." };
   if (invoice && invoice.length > 50) return { error: "Numéro de facture : 50 caractères max." };
-  if (kind === "expense" && (!Number.isInteger(pct) || pct < 0 || pct > 100))
-    return { error: "La part de l'autre doit être un entier entre 0 et 100 %." };
+  const split = computeShares({
+    kind,
+    amountCents: amount,
+    payerId: paidBy,
+    memberIds: members.map((m) => m.id),
+    otherPct: pct,
+    pcts,
+    counterpart: Number(str(f, "counterpart")) || null,
+  });
+  if ("error" in split) return { error: split.error };
+  const shares = split.shares;
+  const nameOf = (id: number) => members.find((m) => m.id === id)?.name ?? "?";
+  const splitText = (list: Share[]) =>
+    members.length > 2 ? list.map((x) => `${nameOf(x.user_id)} ${formatMoney(x.share_cents)}`).join(", ") || "(aucune part)" : undefined;
 
   const prep = await prepareUploads(user.ledger_id, uploadsRaw);
   if ("error" in prep) return { error: prep.error };
@@ -147,7 +205,7 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
   const supplierIds = allSuppliers.filter((s) => wanted.includes(s.id)).map((s) => s.id);
   const namesOf = (ids: number[]) => allSuppliers.filter((s) => ids.includes(s.id)).map((s) => s.name).join(", ");
 
-  const otherShare = kind !== "expense" ? amount : Math.round((amount * pct) / 100);
+  const otherShare = shares.reduce((sum, x) => sum + x.share_cents, 0);
   const after: Snapshot = {
     kind,
     description,
@@ -157,6 +215,7 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
     occurred_on: date,
     invoice_number: invoice,
     suppliers: namesOf(supplierIds),
+    split: splitText(shares),
   };
 
   if (idRaw) {
@@ -179,10 +238,12 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
         occurred_on: before.occurred_on,
         invoice_number: before.invoice_number,
         suppliers: namesOf(before.supplier_ids),
+        split: splitText(before.shares),
       } satisfies Snapshot,
       after,
     });
     await setSuppliers(id, supplierIds);
+    await setShares(id, shares);
     await attach(user, id, description, prep.prepared);
   } else {
     const rows = await q<{ id: number }>(
@@ -192,6 +253,7 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
     );
     await logAudit(user.ledger_id, user.id, "transaction.create", rows[0].id, { after });
     await setSuppliers(rows[0].id, supplierIds);
+    await setShares(rows[0].id, shares);
     await attach(user, rows[0].id, description, prep.prepared);
   }
 
@@ -227,7 +289,7 @@ export async function deleteTransaction(f: FormData) {
 export async function importTransactions(_: FormState, f: FormData): Promise<FormState> {
   const user = await requireUser();
   const members = await getMembers(user.ledger_id);
-  if (members.length !== 2) return { error: "Le deuxième participant doit d'abord rejoindre le compte." };
+  if (members.length !== 2) return { error: "L'importation Excel est réservée aux comptes à deux personnes." };
 
   const file = f.get("file");
   if (!(file instanceof File) || file.size === 0) return { error: "Choisissez un fichier .xlsx." };
@@ -245,6 +307,11 @@ export async function importTransactions(_: FormState, f: FormData): Promise<For
       text: `INSERT INTO transactions (ledger_id, kind, paid_by, amount_cents, other_share_cents, description, occurred_on, created_by, invoice_number)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       params: [user.ledger_id, r.kind, r.paid_by, r.amount_cents, r.other_share_cents, r.description, r.occurred_on, user.id, r.invoice_number],
+    },
+    {
+      text: `INSERT INTO transaction_shares (transaction_id, user_id, share_cents)
+             SELECT currval(pg_get_serial_sequence('transactions','id')), $1::int, $2::int WHERE $2::int > 0`,
+      params: [members.find((m) => m.id !== r.paid_by)!.id, r.other_share_cents],
     },
     {
       text: `INSERT INTO transaction_suppliers (transaction_id, supplier_id)

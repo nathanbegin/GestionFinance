@@ -10,6 +10,7 @@ export type Snapshot = {
   occurred_on: string;
   invoice_number?: string | null;
   suppliers?: string;
+  split?: string;
 };
 
 export async function logAudit(
@@ -46,7 +47,7 @@ export async function listAudit(ledgerId: number, limit = 200): Promise<AuditRow
 const KIND: Record<string, string> = { expense: "Dépense", repayment: "Remboursement", opening: "Solde de départ" };
 
 function describe(s: Snapshot) {
-  return `${KIND[s.kind] ?? s.kind} « ${s.description} » de ${formatMoney(s.amount_cents)} (payé par ${s.paid_by_name}, ${s.occurred_on})${s.invoice_number ? `, facture ${s.invoice_number}` : ""}${s.suppliers ? `, fournisseurs : ${s.suppliers}` : ""}`;
+  return `${KIND[s.kind] ?? s.kind} « ${s.description} » de ${formatMoney(s.amount_cents)} (payé par ${s.paid_by_name}, ${s.occurred_on})${s.invoice_number ? `, facture ${s.invoice_number}` : ""}${s.suppliers ? `, fournisseurs : ${s.suppliers}` : ""}${s.split ? `, répartition : ${s.split}` : ""}`;
 }
 
 /** Libellé lisible d'une ligne du journal */
@@ -72,6 +73,7 @@ export function auditText(row: AuditRow): { verb: string; lines: string[] } {
             `Part de l'autre : ${formatMoney(b.other_share_cents)} → ${formatMoney(a.other_share_cents)}`,
           );
         if (b.occurred_on !== a.occurred_on) lines.push(`Date : ${b.occurred_on} → ${a.occurred_on}`);
+        if ((b.split ?? "") !== (a.split ?? "")) lines.push(`Répartition : ${b.split || "(aucune)"} → ${a.split || "(aucune)"}`);
         if ((b.suppliers ?? "") !== (a.suppliers ?? ""))
           lines.push(`Fournisseurs : ${b.suppliers || "(aucun)"} → ${a.suppliers || "(aucun)"}`);
         if ((b.invoice_number ?? "") !== (a.invoice_number ?? ""))

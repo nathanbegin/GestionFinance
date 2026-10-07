@@ -26,10 +26,15 @@ export default async function SettingsPage() {
       <main>
         <h1>Paramètres</h1>
 
-        <h2>Participants</h2>
+        <h2>Participants du compte actif</h2>
         <div className="card stack">
           <div>Vous : {user.name} ({user.email})</div>
-          <div>Autre participant : {other ? other.name : <span className="muted">pas encore inscrit</span>}</div>
+          <div>
+            {members.length > 2 ? "Autres participants : " : "Autre participant : "}
+            {members.filter((m) => m.id !== user.id).map((m) => m.name).join(", ") || (
+              <span className="muted">pas encore inscrit</span>
+            )}
+          </div>
           {!other && (
             <>
               <div>

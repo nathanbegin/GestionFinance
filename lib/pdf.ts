@@ -138,30 +138,39 @@ export async function renderPdf(s: Statement): Promise<Uint8Array> {
 
   text("État des comptes", MARGIN, 20, bold);
   y -= 22;
-  text(s.members.length === 2 ? `Entre ${a.name} et ${b.name}` : "Compte partagé", MARGIN, 11);
+  text(
+    s.members.length === 2 ? `Entre ${a.name} et ${b.name}` : s.members.length > 2 ? `Groupe : ${s.members.map((m) => m.name).join(", ")}` : "Compte partagé",
+    MARGIN,
+    11,
+  );
   y -= 15;
   text(`Généré le ${s.generatedAt} par ${s.generatedBy}`, MARGIN, 9, font, GRAY);
   y -= 28;
 
-  // Résumé en une phrase
+  // Résumé en une phrase (plusieurs lignes si besoin : un groupe peut avoir plusieurs règlements)
+  const sLines = wrap(s.sentence, bold, 12, PAGE_W - 2 * MARGIN - 20);
+  const barH = sLines.length * 16 + 14;
   page.drawRectangle({
     x: MARGIN,
-    y: y - 10,
+    y: y + 20 - barH,
     width: PAGE_W - 2 * MARGIN,
-    height: 30,
+    height: barH,
     color: rgb(0.93, 0.95, 0.99),
   });
-  text(fit(s.sentence, bold, 12, PAGE_W - 2 * MARGIN - 20), MARGIN + 10, 12, bold);
-  y -= 46;
+  sLines.forEach((l, k) => page.drawText(l, { x: MARGIN + 10, y: y - k * 16, size: 12, font: bold, color: INK }));
+  y -= barH + 16;
 
-  // Solde de chacun : un encadré par personne
+  // Solde de chacun : un encadré par personne (jusqu'à 3 par rangée)
   if (s.balances.length) {
     const gap = 12;
-    const boxW = (PAGE_W - 2 * MARGIN - gap) / 2;
+    const cols = Math.min(s.balances.length, 3);
+    const rows = Math.ceil(s.balances.length / cols);
+    const boxW = (PAGE_W - 2 * MARGIN - gap * (cols - 1)) / cols;
     const boxH = 62;
-    const top = y + 14; // haut de l'encadré
+    const top0 = y + 14; // haut du premier encadré
     s.balances.forEach((bal, i) => {
-      const x = MARGIN + i * (boxW + gap);
+      const x = MARGIN + (i % cols) * (boxW + gap);
+      const top = top0 - Math.floor(i / cols) * (boxH + 8);
       const owed = bal.net > 0;
       const owes = bal.net < 0;
       const tone = owed ? GREEN : owes ? RED : GRAY;
@@ -184,7 +193,7 @@ export async function renderPdf(s: Statement): Promise<Uint8Array> {
       });
       page.drawText(safe(formatMoney(Math.abs(bal.net))), { x: x + 12, y: top - 53, size: 19, font: bold, color: tone });
     });
-    y = top - boxH - 18;
+    y = top0 - rows * boxH - (rows - 1) * 8 - 18;
   }
 
   // Totaux par personne
@@ -223,7 +232,8 @@ export async function renderPdf(s: Statement): Promise<Uint8Array> {
     const sups = t.supplier_ids.map((id) => supplierById.get(id)).filter((x): x is StatementSupplier => !!x);
     const descLines = wrap(t.description, font, 9, descW);
     const supLines = sups.length ? wrap(sups.map((x) => x.name).join(", "), font, 9, supW) : [];
-    const lines = Math.max(descLines.length, supLines.length, 1);
+    const payerLines = wrap(t.payer_name, font, 9, col.amount - col.payer - 50);
+    const lines = Math.max(descLines.length, supLines.length, payerLines.length, 1);
     const rowH = lines * LINE + 7;
     if (y - (lines - 1) * LINE < MARGIN + 30) {
       page = doc.addPage([PAGE_W, PAGE_H]);
@@ -252,7 +262,7 @@ export async function renderPdf(s: Statement): Promise<Uint8Array> {
     descLines.forEach((l, k) => page.drawText(l, { x: col.desc, y: y - k * LINE, size: 9, font, color: INK }));
     supLines.forEach((l, k) => page.drawText(l, { x: col.sup, y: y - k * LINE, size: 9, font, color: INK }));
     text(t.kind === "expense" ? "Dépense" : t.kind === "opening" ? "Solde" : "Remb.", col.type, 9);
-    text(fit(t.payer_name, font, 9, col.amount - col.payer - 62), col.payer, 9);
+    payerLines.forEach((l, k) => page.drawText(l, { x: col.payer, y: y - k * LINE, size: 9, font, color: INK }));
     right(formatMoney(t.amount_cents), col.amount);
     right(formatMoney(t.other_share_cents), col.share);
     y -= rowH;

@@ -88,6 +88,31 @@ const statements = [
    WHERE NOT EXISTS (SELECT 1 FROM suppliers x WHERE x.ledger_id = l.id)`,
   `CREATE INDEX IF NOT EXISTS idx_tx_ledger ON transactions(ledger_id, occurred_on)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_ledger ON audit_log(ledger_id, created_at DESC)`,
+  // --- Plusieurs comptes de dépenses (à deux ou en groupe) ---
+  `ALTER TABLE ledgers ADD COLUMN IF NOT EXISTS name TEXT`,
+  `ALTER TABLE ledgers ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id)`,
+  `ALTER TABLE users ALTER COLUMN ledger_id DROP NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS ledger_members (
+    ledger_id INTEGER NOT NULL REFERENCES ledgers(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (ledger_id, user_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_members_user ON ledger_members(user_id)`,
+  `INSERT INTO ledger_members (ledger_id, user_id) SELECT ledger_id, id FROM users WHERE ledger_id IS NOT NULL ON CONFLICT DO NOTHING`,
+  `CREATE TABLE IF NOT EXISTS transaction_shares (
+    transaction_id INTEGER NOT NULL REFERENCES transactions(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    share_cents INTEGER NOT NULL CHECK (share_cents >= 0),
+    PRIMARY KEY (transaction_id, user_id)
+  )`,
+  `INSERT INTO transaction_shares (transaction_id, user_id, share_cents)
+   SELECT t.id, m.user_id, t.other_share_cents FROM transactions t
+   JOIN ledger_members m ON m.ledger_id = t.ledger_id AND m.user_id <> t.paid_by
+   WHERE t.other_share_cents > 0
+     AND NOT EXISTS (SELECT 1 FROM transaction_shares s WHERE s.transaction_id = t.id)
+     AND (SELECT count(*) FROM ledger_members x WHERE x.ledger_id = t.ledger_id) = 2
+   ON CONFLICT DO NOTHING`,
 ];
 
 for (const s of statements) {

@@ -33,7 +33,12 @@ export function texMoney(cents: number): string {
 
 export function renderTex(s: Statement): string {
   const [a, b] = s.members;
-  const title = s.members.length === 2 ? `Entre ${texEscape(a.name)} et ${texEscape(b.name)}` : "Compte partagé";
+  const title =
+    s.members.length === 2
+      ? `Entre ${texEscape(a.name)} et ${texEscape(b.name)}`
+      : s.members.length > 2
+        ? `Groupe : ${s.members.map((m) => texEscape(m.name)).join(", ")}`
+        : "Compte partagé";
 
   const rows = s.txs
     .map(

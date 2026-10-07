@@ -29,7 +29,7 @@ export default async function ImportPage() {
         {members.length === 2 ? (
           <ImportForm />
         ) : (
-          <div className="card muted">Le deuxième participant doit d&apos;abord rejoindre le compte.</div>
+          <div className="card muted">L&apos;importation Excel est réservée aux comptes à deux personnes. Pour un groupe, ajoutez les transactions une par une.</div>
         )}
         <p className="muted">
           Maximum {MAX_ROWS} lignes. Si une ligne est invalide, rien n&apos;est importé et les erreurs sont listées.

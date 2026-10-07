@@ -12,6 +12,7 @@ export default function TxList({
   txs,
   userId,
   other,
+  members = [],
   attachments,
   suppliers,
   empty = "Aucune transaction pour l'instant.",
@@ -19,6 +20,8 @@ export default function TxList({
   txs: Tx[];
   userId: number;
   other?: Member;
+  /** Participants du compte (pour détailler les parts d'un groupe). */
+  members?: Member[];
   attachments: Map<number, Attachment[]>;
   suppliers: Supplier[];
   empty?: string;
@@ -55,8 +58,16 @@ export default function TxList({
                 {t.kind === "expense" ? "Payé par" : t.kind === "opening" ? "Dû à" : "Remboursé par"}{" "}
                 {t.paid_by === userId ? "vous" : t.payer_name} ·{" "}
                 {t.occurred_on}
-                {t.kind === "expense" &&
-                  ` · part de ${t.paid_by === userId ? (other?.name ?? "l'autre") : "vous"} : ${formatMoney(t.other_share_cents)}`}
+                {members.length > 2
+                  ? t.shares.length > 0 &&
+                    ` · ${t.kind === "expense" ? "parts" : t.kind === "repayment" ? "remboursé à" : "dû par"} : ${t.shares
+                      .map((x) => {
+                        const n = x.user_id === userId ? "vous" : (members.find((m) => m.id === x.user_id)?.name ?? "?");
+                        return t.kind === "expense" ? `${n} ${formatMoney(x.share_cents)}` : n;
+                      })
+                      .join(", ")}`
+                  : t.kind === "expense" &&
+                    ` · part de ${t.paid_by === userId ? (other?.name ?? "l'autre") : "vous"} : ${formatMoney(t.other_share_cents)}`}
               </div>
               {files.length > 0 && (
                 <div className="tx-files">

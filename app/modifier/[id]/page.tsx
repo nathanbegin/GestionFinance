@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { getMembers, getTransaction, listAttachments } from "@/lib/ledger";
 import { listSuppliers } from "@/lib/suppliers";
+import { sharesToPcts } from "@/lib/shares";
 import AttachmentList from "@/components/AttachmentList";
 import { toInput } from "@/lib/money";
 import Nav from "@/components/Nav";
@@ -44,6 +45,8 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
             occurred_on: tx.occurred_on,
             invoice_number: tx.invoice_number ?? "",
             supplier_ids: tx.supplier_ids,
+            pcts: members.length > 2 && tx.kind === "expense" ? sharesToPcts(tx.amount_cents, tx.paid_by, members.map((m) => m.id), tx.shares) : {},
+            counterpart: tx.kind !== "expense" ? (tx.shares[0]?.user_id ?? null) : null,
           }}
         />
         <h2>Pièces jointes</h2>

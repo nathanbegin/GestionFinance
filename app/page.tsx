@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { balanceForUser, computeNet, getMembers, listAttachments, listTransactions, todayLocal } from "@/lib/ledger";
+import { balanceForUser, computeNet, getMembers, listAttachments, listTransactions, suggestSettlements, todayLocal } from "@/lib/ledger";
+import { listAccounts } from "@/lib/accounts";
 import { formatMoney } from "@/lib/money";
 import { q } from "@/lib/db";
 import { listSuppliers } from "@/lib/suppliers";
@@ -9,17 +10,21 @@ import TxList from "@/components/TxList";
 
 export default async function Home() {
   const user = await requireUser();
-  const [members, txs, attachments, suppliers, ledger] = await Promise.all([
+  const [members, txs, attachments, suppliers, ledger, accounts] = await Promise.all([
     getMembers(user.ledger_id),
     listTransactions(user.ledger_id),
     listAttachments(user.ledger_id),
     listSuppliers(user.ledger_id),
     q<{ invite_code: string }>("SELECT invite_code FROM ledgers WHERE id = $1", [user.ledger_id]),
+    listAccounts(user.id),
   ]);
   const net = computeNet(txs, members);
   const balance = balanceForUser(user.id, members, net);
-  const complete = members.length === 2;
+  const complete = members.length >= 2;
+  const isGroup = members.length > 2;
   const other = members.find((m) => m.id !== user.id);
+  const account = accounts.find((a) => a.id === user.ledger_id);
+  const settlements = isGroup ? suggestSettlements(members, net) : [];
 
   const month = todayLocal().slice(0, 7);
   const inMonth = txs.filter((t) => t.kind === "expense" && t.occurred_on.startsWith(month));
@@ -36,7 +41,9 @@ export default async function Home() {
       <Nav name={user.name} />
       <main>
         <section className={`hero ${balance.tone}`}>
-          <div className="hero-label">Bonjour {user.name} · solde actuel</div>
+          <div className="hero-label">
+            {account?.label ?? "Compte"} · solde de {user.name}
+          </div>
           <div className="hero-amount">{balance.text}</div>
           <div className="hero-actions">
             <Link className="button solid" href="/nouvelle">
@@ -47,6 +54,36 @@ export default async function Home() {
             </Link>
           </div>
         </section>
+
+        {isGroup && (
+          <div className="card stack" style={{ marginTop: 16 }}>
+            <strong>Solde de chaque participant</strong>
+            {members.map((m) => {
+              const v = net.get(m.id) ?? 0;
+              return (
+                <div key={m.id} className="split-total">
+                  <span>{m.id === user.id ? "Vous" : m.name}</span>
+                  <strong className={v > 0 ? "ok" : v < 0 ? "error" : "muted"}>
+                    {v > 0 ? "On lui doit " : v < 0 ? "Doit " : "À jour "}
+                    {v !== 0 && formatMoney(Math.abs(v))}
+                  </strong>
+                </div>
+              );
+            })}
+            {settlements.length > 0 && (
+              <>
+                <span className="muted">Pour tout régler :</span>
+                <ul className="settle">
+                  {settlements.map((s, i) => (
+                    <li key={i}>
+                      {s.from.id === user.id ? "Vous" : s.from.name} → {s.to.id === user.id ? "vous" : s.to.name} : {formatMoney(s.cents)}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        )}
 
         {!complete && (
           <div className="card stack" style={{ marginTop: 16 }}>
@@ -68,7 +105,7 @@ export default async function Home() {
             <div className="kpi-value">{formatMoney(sum(inMonth.filter((t) => t.paid_by === user.id)))}</div>
           </div>
           <div className="kpi">
-            <div className="kpi-label">Payé par {other?.name ?? "l'autre"} (ce mois)</div>
+            <div className="kpi-label">Payé par {isGroup ? "les autres" : (other?.name ?? "l'autre")} (ce mois)</div>
             <div className="kpi-value">{formatMoney(sum(inMonth.filter((t) => t.paid_by !== user.id)))}</div>
           </div>
           <div className="kpi">
@@ -83,7 +120,7 @@ export default async function Home() {
           <h2>Dernières transactions</h2>
           <Link href="/transactions">Tout voir →</Link>
         </div>
-        <TxList txs={txs.slice(0, 5)} userId={user.id} other={other} attachments={attachments} suppliers={suppliers} />
+        <TxList txs={txs.slice(0, 5)} userId={user.id} other={other} members={members} attachments={attachments} suppliers={suppliers} />
 
         <div className="actions-bar">
           <a className="button" href="/api/export/pdf">

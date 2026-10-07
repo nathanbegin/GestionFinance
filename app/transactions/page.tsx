@@ -41,6 +41,7 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
           txs={txs}
           userId={user.id}
           other={other}
+          members={members}
           attachments={attachments}
           suppliers={suppliers}
           empty={query ? "Aucun résultat." : "Aucune transaction pour l'instant."}

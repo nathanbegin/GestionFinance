@@ -18,6 +18,10 @@ export type Initial = {
   occurred_on: string;
   invoice_number: string;
   supplier_ids: number[];
+  /** Compte de groupe : part de chaque participant (payeur compris), en %. */
+  pcts: Record<number, number>;
+  /** Remboursement / solde de départ dans un groupe : la personne concernée. */
+  counterpart: number | null;
 };
 
 export default function TransactionForm({
@@ -36,6 +40,25 @@ export default function TransactionForm({
   const [state, action, pending] = useActionState(saveTransaction, undefined);
   const [kind, setKind] = useState(initial.kind);
   const [uploading, setUploading] = useState(false);
+  const isGroup = members.length > 2;
+  const [payer, setPayer] = useState(initial.paid_by);
+  const [counterpart, setCounterpart] = useState<number | null>(initial.counterpart);
+  // Pourcentages d'un compte de groupe (chaîne : permet un champ temporairement vide)
+  const [pcts, setPcts] = useState<Record<number, string>>(() => {
+    const out: Record<number, string> = {};
+    const hasSaved = Object.keys(initial.pcts).length > 0;
+    members.forEach((m, i) => {
+      out[m.id] = String(hasSaved ? (initial.pcts[m.id] ?? 0) : Math.floor(100 / members.length) + (i === 0 ? 100 % members.length : 0));
+    });
+    return out;
+  });
+  const pctTotal = members.reduce((sum, m) => sum + (Number(pcts[m.id]) || 0), 0);
+
+  function splitEvenly() {
+    const out: Record<number, string> = {};
+    members.forEach((m, i) => (out[m.id] = String(Math.floor(100 / members.length) + (i === 0 ? 100 % members.length : 0))));
+    setPcts(out);
+  }
   // Fournisseurs cochés ; « dismissed » = ceux que l'utilisateur a décochés lui-même (on ne les recoche plus).
   const [picked, setPicked] = useState<Set<number>>(new Set(initial.supplier_ids));
   const [auto, setAuto] = useState<Set<number>>(new Set());
@@ -102,7 +125,7 @@ export default function TransactionForm({
         </label>
         <label>
           {kind === "repayment" ? "Qui rembourse ?" : kind === "opening" ? "À qui doit-on cet argent ?" : "Payé par"}
-          <select name="paid_by" defaultValue={initial.paid_by}>
+          <select name="paid_by" value={payer} onChange={(e) => setPayer(Number(e.target.value))}>
             {members.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
@@ -111,7 +134,52 @@ export default function TransactionForm({
           </select>
         </label>
       </div>
-      {kind === "expense" && (
+      {isGroup && kind !== "expense" && (
+        <label>
+          {kind === "repayment" ? "Remboursé à" : "Qui doit cet argent ?"}
+          <select name="counterpart" required value={counterpart ?? ""} onChange={(e) => setCounterpart(Number(e.target.value) || null)}>
+            <option value="">— Choisir —</option>
+            {members
+              .filter((m) => m.id !== payer)
+              .map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+          </select>
+        </label>
+      )}
+      {isGroup && kind === "expense" && (
+        <fieldset className="split">
+          <legend>Répartition de la dépense (%)</legend>
+          {members.map((m) => (
+            <label key={m.id} className="split-row">
+              <span>
+                {m.name}
+                {m.id === payer && <span className="muted"> (a payé)</span>}
+              </span>
+              <input
+                name={`pct_${m.id}`}
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                required
+                value={pcts[m.id]}
+                onChange={(e) => setPcts({ ...pcts, [m.id]: e.target.value })}
+              />
+            </label>
+          ))}
+          <div className="split-total">
+            <span className={pctTotal === 100 ? "ok" : "error"}>Total : {pctTotal} %{pctTotal === 100 ? " ✓" : " (doit faire 100 %)"}</span>
+            <button type="button" className="link" onClick={splitEvenly}>
+              Répartir également
+            </button>
+          </div>
+          <span className="muted">Chaque participant autre que le payeur doit sa part au payeur.</span>
+        </fieldset>
+      )}
+      {!isGroup && kind === "expense" && (
         <label>
           Part due par l&apos;autre personne (%)
           <input

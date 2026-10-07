@@ -12,7 +12,7 @@ export default async function NewTransactionPage() {
       <Nav name={user.name} />
       <main>
         <h1>Nouvelle transaction</h1>
-        {members.length === 2 ? (
+        {members.length >= 2 ? (
           <TransactionForm
             members={members}
             submitLabel="Ajouter"
@@ -27,10 +27,12 @@ export default async function NewTransactionPage() {
               occurred_on: todayLocal(),
               invoice_number: "",
               supplier_ids: [],
+              pcts: {},
+              counterpart: null,
             }}
           />
         ) : (
-          <div className="card muted">Le deuxième participant doit d&apos;abord rejoindre le compte.</div>
+          <div className="card muted">Il faut au moins deux participants dans ce compte.</div>
         )}
       </main>
     </>

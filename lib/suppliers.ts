@@ -40,6 +40,16 @@ export async function seedSuppliers(ledgerId: number) {
     ]);
 }
 
+/** Copie les fournisseurs (logos compris) d'un compte vers un autre. */
+export async function copySuppliers(fromLedger: number, toLedger: number) {
+  await q(
+    `INSERT INTO suppliers (ledger_id, name, color, keywords, logo_type, logo_data)
+     SELECT $2, name, color, keywords, logo_type, logo_data FROM suppliers
+     WHERE ledger_id = $1 AND deleted_at IS NULL ON CONFLICT DO NOTHING`,
+    [fromLedger, toLedger],
+  );
+}
+
 /** Valide un fichier de logo : PNG, JPEG ou WebP seulement (pas de SVG : il peut contenir du code). */
 export async function readLogo(file: unknown): Promise<null | { error: string } | { type: string; b64: string }> {
   if (!(file instanceof File) || file.size === 0) return null;

@@ -4,7 +4,7 @@ import { getMembers } from "@/lib/ledger";
 import { q } from "@/lib/db";
 import Nav from "@/components/Nav";
 import { NameForm, PasswordForm, ShareForm } from "@/components/SettingsForms";
-import { AddSupplierForm, SupplierList } from "@/components/SupplierForms";
+import { AddSupplierForm, AutoLinkButton, SupplierList } from "@/components/SupplierForms";
 import { listSuppliers } from "@/lib/suppliers";
 
 export default async function SettingsPage() {
@@ -51,6 +51,7 @@ export default async function SettingsPage() {
         <div style={{ marginTop: 12 }}>
           <AddSupplierForm />
         </div>
+        <AutoLinkButton />
 
         <h2>Profil</h2>
         <NameForm name={user.name} />

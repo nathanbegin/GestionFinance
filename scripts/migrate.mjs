@@ -74,6 +74,8 @@ const statements = [
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ
   )`,
+  `ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS keywords TEXT`,
+  `UPDATE suppliers SET keywords = 'Fertilisation du Nord, ProVert' WHERE keywords IS NULL AND name = 'Fertilisation du Nord ProVert'`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_supplier_name ON suppliers(ledger_id, lower(name)) WHERE deleted_at IS NULL`,
   `CREATE TABLE IF NOT EXISTS transaction_suppliers (
     transaction_id INTEGER NOT NULL REFERENCES transactions(id),

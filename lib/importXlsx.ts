@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { parseAmount } from "./money";
+import { matchSuppliers } from "./supplierMatch";
 
 export const SHEET = "Dépenses";
 export const HEADERS = ["Date", "Description", "Montant", "Payé par", "Part de l'autre (%)", "Type", "Numéro de facture", "Fournisseurs"] as const;
@@ -115,7 +116,7 @@ export async function buildTemplate(members: Member[], today: string, supplierNa
     "Part de l'autre (%) : entier de 0 à 100 = part due par l'autre personne. Vide = votre répartition par défaut (Paramètres). Ignoré pour un remboursement.",
     "Type : Dépense, Remboursement ou Solde de départ. Vide = Dépense. Un remboursement compte pour 100 % du montant.",
     "Solde de départ : montant déjà dû avant l'application. « Payé par » = la personne à qui on doit cet argent. Description facultative.",
-    `Fournisseurs : facultatif, un ou plusieurs noms séparés par un point-virgule${supplierNames.length ? ` (${supplierNames.join(" ; ")})` : ""}. Ils doivent exister dans Paramètres.`,
+    `Fournisseurs : facultatif, un ou plusieurs noms séparés par un point-virgule${supplierNames.length ? ` (${supplierNames.join(" ; ")})` : ""}. Ils doivent exister dans Paramètres. Vide = détection automatique d'après la description.`,
     "Numéro de facture : facultatif, 50 caractères max. Les pièces jointes (photos, PDF) s'ajoutent ensuite, transaction par transaction.",
     "",
     "Les lignes dont la description commence par « (Exemple) » sont ignorées : vous pouvez les laisser ou les supprimer.",
@@ -132,7 +133,7 @@ export async function parseWorkbook(
   data: ArrayBuffer,
   members: Member[],
   me: { id: number; default_share_pct: number },
-  suppliers: { id: number; name: string }[] = [],
+  suppliers: { id: number; name: string; keywords?: string }[] = [],
 ): Promise<ParseResult> {
   const wb = new ExcelJS.Workbook();
   try {
@@ -190,6 +191,8 @@ export async function parseWorkbook(
       if (!found) problems.push(`fournisseur inconnu : « ${part} » (à créer dans Paramètres)`);
       else if (!supplierIds.includes(found.id)) supplierIds.push(found.id);
     }
+
+    if (text(cells[7].value) === "") supplierIds.push(...matchSuppliers(description, suppliers));
 
     let pct = me.default_share_pct;
     const pctRaw = unwrap(cells[4].value);

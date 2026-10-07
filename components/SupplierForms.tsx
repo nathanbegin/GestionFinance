@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { addSupplier, deleteSupplier, updateSupplier } from "@/app/actions";
+import { addSupplier, autoLinkSuppliers, deleteSupplier, updateSupplier } from "@/app/actions";
 import type { Supplier } from "@/lib/suppliers";
 import LogoInput from "./LogoInput";
 import SupplierLogo from "./SupplierLogo";
@@ -21,6 +21,10 @@ export function AddSupplierForm() {
           <input name="color" type="color" defaultValue="#2459d6" />
         </label>
       </div>
+      <label>
+        Mots-clés de détection <span className="muted">(facultatif, séparés par des virgules)</span>
+        <input name="keywords" maxLength={300} placeholder="ex. : Hydro, HQ" />
+      </label>
       <label>
         Logo <span className="muted">(facultatif : PNG, JPEG ou WebP)</span>
         <LogoInput />
@@ -48,6 +52,10 @@ function EditSupplierForm({ s }: { s: Supplier }) {
         </label>
       </div>
       <label>
+        Mots-clés de détection <span className="muted">(le nom est toujours détecté ; séparez par des virgules)</span>
+        <input name="keywords" maxLength={300} defaultValue={s.keywords} />
+      </label>
+      <label>
         Nouveau logo <span className="muted">(remplace l&apos;actuel)</span>
         <LogoInput />
       </label>
@@ -59,6 +67,22 @@ function EditSupplierForm({ s }: { s: Supplier }) {
       {state?.error && <p className="error">{state.error}</p>}
       {state?.ok && <p className="ok">{state.ok}</p>}
       <button disabled={pending}>Enregistrer</button>
+    </form>
+  );
+}
+
+export function AutoLinkButton() {
+  const [state, action, pending] = useActionState(autoLinkSuppliers, undefined);
+  return (
+    <form action={action} className="card stack" style={{ marginTop: 12 }}>
+      <strong>Détection automatique</strong>
+      <p className="muted" style={{ margin: 0 }}>
+        Quand vous écrivez une description, le fournisseur dont le nom ou un mot-clé y figure est coché automatiquement. Ce bouton
+        applique la même règle aux transactions existantes qui n&apos;ont encore aucun fournisseur.
+      </p>
+      {state?.error && <p className="error">{state.error}</p>}
+      {state?.ok && <p className="ok">{state.ok}</p>}
+      <button disabled={pending}>Compléter les transactions existantes</button>
     </form>
   );
 }

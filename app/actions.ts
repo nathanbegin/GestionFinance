@@ -6,12 +6,13 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { q, qTransaction } from "@/lib/db";
 import { createSession, destroySession, requireUser, type User } from "@/lib/auth";
-import { getMembers, getTransaction } from "@/lib/ledger";
+import { getMembers, getTransaction, listTransactions } from "@/lib/ledger";
 import { logAudit, type Snapshot } from "@/lib/audit";
 import { parseAmount } from "@/lib/money";
 import { MAX_ROWS, parseWorkbook } from "@/lib/importXlsx";
 import { insertAttachments, prepareUploads, type Prepared } from "@/lib/attachments";
 import { listSuppliers, readLogo, seedSuppliers } from "@/lib/suppliers";
+import { matchSuppliers, splitKeywords } from "@/lib/supplierMatch";
 
 export type FormState = { error?: string; ok?: string; details?: string[] } | undefined;
 
@@ -282,12 +283,21 @@ export async function importTransactions(_: FormState, f: FormData): Promise<For
 
 const COLOR = /^#[0-9a-fA-F]{6}$/;
 
+/** Mots-clés nettoyés (20 max, 60 caractères chacun) ou message d'erreur. */
+function cleanKeywords(raw: string): { error: string } | { keywords: string | null } {
+  const list = splitKeywords(raw);
+  if (list.length > 20 || list.some((k) => k.length > 60)) return { error: "Mots-clés : 20 maximum, 60 caractères chacun." };
+  return { keywords: list.length ? list.join(", ") : null };
+}
+
 export async function addSupplier(_: FormState, f: FormData): Promise<FormState> {
   const user = await requireUser();
   const name = str(f, "name");
   const color = str(f, "color") || "#2459d6";
   if (name.length < 1 || name.length > 60) return { error: "Nom requis (60 caractères max)." };
   if (!COLOR.test(color)) return { error: "Couleur invalide." };
+  const kw = cleanKeywords(str(f, "keywords"));
+  if ("error" in kw) return { error: kw.error };
   const logo = await readLogo(f.get("logo"));
   if (logo && "error" in logo) return { error: logo.error };
   const dup = await q("SELECT 1 FROM suppliers WHERE ledger_id = $1 AND lower(name) = lower($2) AND deleted_at IS NULL", [
@@ -296,8 +306,8 @@ export async function addSupplier(_: FormState, f: FormData): Promise<FormState>
   ]);
   if (dup.length) return { error: "Ce fournisseur existe déjà." };
   await q(
-    "INSERT INTO suppliers (ledger_id, name, color, logo_type, logo_data) VALUES ($1, $2, $3, $4, decode($5, 'base64'))",
-    [user.ledger_id, name, color, logo?.type ?? null, logo?.b64 ?? null],
+    "INSERT INTO suppliers (ledger_id, name, color, keywords, logo_type, logo_data) VALUES ($1, $2, $3, $4, $5, decode($6, 'base64'))",
+    [user.ledger_id, name, color, kw.keywords, logo?.type ?? null, logo?.b64 ?? null],
   );
   await logAudit(user.ledger_id, user.id, "supplier.change", null, { description: `Fournisseur ajouté : ${name}` });
   revalidatePath("/", "layout");
@@ -311,6 +321,8 @@ export async function updateSupplier(_: FormState, f: FormData): Promise<FormSta
   const color = str(f, "color");
   if (name.length < 1 || name.length > 60) return { error: "Nom requis (60 caractères max)." };
   if (!COLOR.test(color)) return { error: "Couleur invalide." };
+  const kw = cleanKeywords(str(f, "keywords"));
+  if ("error" in kw) return { error: kw.error };
   const logo = await readLogo(f.get("logo"));
   if (logo && "error" in logo) return { error: logo.error };
   const dup = await q(
@@ -321,16 +333,44 @@ export async function updateSupplier(_: FormState, f: FormData): Promise<FormSta
 
   const removeLogo = str(f, "remove_logo") === "on";
   const res = await q(
-    `UPDATE suppliers SET name = $1, color = $2, updated_at = now(),
+    `UPDATE suppliers SET name = $1, color = $2, keywords = $8, updated_at = now(),
        logo_type = CASE WHEN $3::text IS NOT NULL THEN $3 WHEN $4::boolean THEN NULL ELSE logo_type END,
        logo_data = CASE WHEN $5::text IS NOT NULL THEN decode($5, 'base64') WHEN $4::boolean THEN NULL ELSE logo_data END
      WHERE id = $6 AND ledger_id = $7 AND deleted_at IS NULL RETURNING id`,
-    [name, color, logo?.type ?? null, removeLogo, logo?.b64 ?? null, id, user.ledger_id],
+    [name, color, logo?.type ?? null, removeLogo, logo?.b64 ?? null, id, user.ledger_id, kw.keywords],
   );
   if (!res.length) return { error: "Fournisseur introuvable." };
   await logAudit(user.ledger_id, user.id, "supplier.change", null, { description: `Fournisseur modifié : ${name}` });
   revalidatePath("/", "layout");
   return { ok: "Fournisseur mis à jour." };
+}
+
+/** Lie automatiquement les fournisseurs détectés dans la description des transactions qui n'en ont aucun. */
+export async function autoLinkSuppliers(_: FormState, __: FormData): Promise<FormState> {
+  const user = await requireUser();
+  const [suppliers, txs] = await Promise.all([listSuppliers(user.ledger_id), listTransactions(user.ledger_id)]);
+  const queries: { text: string; params: unknown[] }[] = [];
+  let count = 0;
+  for (const t of txs) {
+    if (t.supplier_ids.length) continue;
+    const ids = matchSuppliers(t.description, suppliers);
+    if (!ids.length) continue;
+    count++;
+    const names = suppliers.filter((s) => ids.includes(s.id)).map((s) => s.name).join(", ");
+    queries.push(
+      {
+        text: "INSERT INTO transaction_suppliers (transaction_id, supplier_id) SELECT $1, unnest($2::int[]) ON CONFLICT DO NOTHING",
+        params: [t.id, ids],
+      },
+      {
+        text: "INSERT INTO audit_log (ledger_id, user_id, transaction_id, action, details) VALUES ($1, $2, $3, 'supplier.change', $4)",
+        params: [user.ledger_id, user.id, t.id, JSON.stringify({ description: `Fournisseur(s) détecté(s) d'après la description : ${names}` })],
+      },
+    );
+  }
+  if (queries.length) await qTransaction(queries);
+  revalidatePath("/", "layout");
+  return { ok: count ? `${count} transaction${count > 1 ? "s" : ""} mise${count > 1 ? "s" : ""} à jour.` : "Aucune transaction sans fournisseur à compléter." };
 }
 
 export async function deleteSupplier(f: FormData) {

@@ -3,6 +3,7 @@
 import { useActionState, useState } from "react";
 import { saveTransaction } from "@/app/actions";
 import type { Supplier } from "@/lib/suppliers";
+import { matchSuppliers } from "@/lib/supplierMatch";
 import FilePicker from "./FilePicker";
 import SupplierLogo from "./SupplierLogo";
 
@@ -35,6 +36,32 @@ export default function TransactionForm({
   const [state, action, pending] = useActionState(saveTransaction, undefined);
   const [kind, setKind] = useState(initial.kind);
   const [uploading, setUploading] = useState(false);
+  // Fournisseurs cochés ; « dismissed » = ceux que l'utilisateur a décochés lui-même (on ne les recoche plus).
+  const [picked, setPicked] = useState<Set<number>>(new Set(initial.supplier_ids));
+  const [auto, setAuto] = useState<Set<number>>(new Set());
+  const [dismissed, setDismissed] = useState<Set<number>>(new Set());
+
+  function suggest(text: string) {
+    const ids = matchSuppliers(text, suppliers).filter((id) => !dismissed.has(id) && !picked.has(id));
+    if (!ids.length) return;
+    setPicked(new Set([...picked, ...ids]));
+    setAuto(new Set([...auto, ...ids]));
+  }
+
+  function toggle(id: number, on: boolean) {
+    const next = new Set(picked);
+    const nextDismissed = new Set(dismissed);
+    if (on) {
+      next.add(id);
+      nextDismissed.delete(id);
+    } else {
+      next.delete(id);
+      nextDismissed.add(id);
+    }
+    setPicked(next);
+    setDismissed(nextDismissed);
+    setAuto(new Set([...auto].filter((a) => a !== id)));
+  }
 
   return (
     <form action={action} className="card stack">
@@ -60,6 +87,7 @@ export default function TransactionForm({
           required={kind !== "opening"}
           maxLength={200}
           defaultValue={initial.description}
+          onChange={(e) => suggest(e.target.value)}
           placeholder={kind === "opening" ? "Solde de départ" : undefined}
         />
       </label>
@@ -104,7 +132,7 @@ export default function TransactionForm({
         </p>
       )}
       <fieldset className="supplier-picks">
-        <legend>Fournisseur(s) — logo affiché sur la transaction</legend>
+        <legend>Fournisseur(s) — le logo s&apos;affiche sur la transaction</legend>
         {suppliers.length === 0 && (
           <span className="muted">
             Aucun fournisseur : ajoutez-en dans <a href="/parametres">Paramètres</a>.
@@ -112,9 +140,10 @@ export default function TransactionForm({
         )}
         {suppliers.map((s) => (
           <label className="chip" key={s.id}>
-            <input type="checkbox" name="suppliers" value={s.id} defaultChecked={initial.supplier_ids.includes(s.id)} />
+            <input type="checkbox" name="suppliers" value={s.id} checked={picked.has(s.id)} onChange={(e) => toggle(s.id, e.target.checked)} />
             <SupplierLogo s={s} size={22} />
             {s.name}
+            {auto.has(s.id) && <span className="muted">suggéré</span>}
           </label>
         ))}
       </fieldset>

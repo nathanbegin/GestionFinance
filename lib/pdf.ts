@@ -218,6 +218,7 @@ export async function renderPdf(s: Statement): Promise<Uint8Array> {
   };
   header();
 
+  let rowIndex = 0;
   for (const t of s.txs) {
     const sups = t.supplier_ids.map((id) => supplierById.get(id)).filter((x): x is StatementSupplier => !!x);
     const descLines = wrap(t.description, font, 9, descW);
@@ -229,6 +230,23 @@ export async function renderPdf(s: Statement): Promise<Uint8Array> {
       y = PAGE_H - MARGIN;
       header();
     }
+    // Fond alterné + fine ligne pâle entre les transactions, pour ne pas se tromper de ligne
+    const rowTop = y + 11;
+    if (rowIndex % 2 === 1)
+      page.drawRectangle({
+        x: MARGIN - 4,
+        y: rowTop - rowH,
+        width: PAGE_W - 2 * MARGIN + 8,
+        height: rowH,
+        color: rgb(0.945, 0.953, 0.965),
+      });
+    page.drawLine({
+      start: { x: MARGIN - 4, y: rowTop - rowH },
+      end: { x: PAGE_W - MARGIN + 4, y: rowTop - rowH },
+      thickness: 0.4,
+      color: rgb(0.84, 0.86, 0.89),
+    });
+    rowIndex++;
     sups.slice(0, MAX_LOGOS).forEach((sup, i) => drawLogo(sup, col.logo + i * (LOGO + LOGO_GAP), y - 3));
     text(t.occurred_on, col.date, 9);
     descLines.forEach((l, k) => page.drawText(l, { x: col.desc, y: y - k * LINE, size: 9, font, color: INK }));

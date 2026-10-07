@@ -200,7 +200,7 @@ export async function renderPdf(s: Statement): Promise<Uint8Array> {
   y -= 14;
 
   // Colonnes (les miniatures occupent la première, devant la date)
-  const col = { logo: MARGIN, date: 88, desc: 142, sup: 424, type: 548, payer: 600, amount: 722, share: PAGE_W - MARGIN };
+  const col = { logo: MARGIN, date: 88, desc: 142, sup: 410, type: 534, payer: 586, amount: 704, share: PAGE_W - MARGIN };
   const descW = col.sup - col.desc - 10;
   const supW = col.type - col.sup - 10;
   const LINE = 11;

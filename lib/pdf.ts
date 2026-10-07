@@ -1,10 +1,29 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
-import type { Statement } from "./statement";
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
+import type { Statement, StatementSupplier } from "./statement";
 import { formatMoney } from "./money";
 
-const PAGE_W = 595.28;
-const PAGE_H = 841.89;
-const MARGIN = 50;
+// A4 en paysage : plus de place pour les descriptions et les fournisseurs
+const PAGE_W = 841.89;
+const PAGE_H = 595.28;
+const MARGIN = 40;
+const LOGO = 12; // taille des miniatures (points)
+const LOGO_GAP = 3;
+const MAX_LOGOS = 3;
+
+const INK = rgb(0.1, 0.12, 0.16);
+const GREEN = rgb(0.07, 0.48, 0.25);
+const RED = rgb(0.71, 0.14, 0.09);
+const GRAY = rgb(0.4, 0.44, 0.5);
+
+function hexColor(hex: string) {
+  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  return m ? rgb(parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255) : rgb(0.14, 0.35, 0.84);
+}
+
+function initials(name: string): string {
+  const words = name.split(/\s+/).filter(Boolean);
+  return (words.length > 1 ? words.slice(0, 2).map((w) => w[0]) : [name.slice(0, 2)]).join("").toUpperCase();
+}
 
 export async function renderPdf(s: Statement): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
@@ -14,7 +33,7 @@ export async function renderPdf(s: Statement): Promise<Uint8Array> {
 
   // Remplace tout caractère que la police standard ne sait pas encoder
   const safe = (t: string) =>
-    Array.from(t.replace(/[  ]/g, " "))
+    Array.from(t.replace(/[  ]/g, " "))
       .map((c) => (supported.has(c.codePointAt(0)!) ? c : "?"))
       .join("");
 
@@ -25,14 +44,55 @@ export async function renderPdf(s: Statement): Promise<Uint8Array> {
     return out + "...";
   };
 
+  /** Découpe un texte en lignes qui tiennent dans maxW (aucune troncature). */
+  const wrap = (t: string, f: PDFFont, size: number, maxW: number): string[] => {
+    const out: string[] = [];
+    let line = "";
+    for (const word of safe(t).split(" ")) {
+      let w = word;
+      // mot plus long que la colonne : on le coupe
+      while (f.widthOfTextAtSize(w, size) > maxW && w.length > 1) {
+        let n = w.length - 1;
+        while (n > 1 && f.widthOfTextAtSize(w.slice(0, n), size) > maxW) n--;
+        if (line) {
+          out.push(line);
+          line = "";
+        }
+        out.push(w.slice(0, n));
+        w = w.slice(n);
+      }
+      const next = line ? `${line} ${w}` : w;
+      if (f.widthOfTextAtSize(next, size) <= maxW) line = next;
+      else {
+        out.push(line);
+        line = w;
+      }
+    }
+    if (line) out.push(line);
+    return out.length ? out : [""];
+  };
+
+  // Logos : pdf-lib sait intégrer PNG et JPEG ; sinon (WebP, absent, illisible) on dessine une pastille.
+  const images = new Map<number, PDFImage>();
+  for (const sup of s.suppliers) {
+    if (!sup.logo) continue;
+    try {
+      if (sup.logo.type === "image/png") images.set(sup.id, await doc.embedPng(sup.logo.bytes));
+      else if (sup.logo.type === "image/jpeg") images.set(sup.id, await doc.embedJpg(sup.logo.bytes));
+    } catch {
+      /* image illisible : pastille de couleur */
+    }
+  }
+  const supplierById = new Map(s.suppliers.map((x) => [x.id, x]));
+
   let page: PDFPage = doc.addPage([PAGE_W, PAGE_H]);
   let y = PAGE_H - MARGIN;
 
-  const text = (t: string, x: number, size = 10, f: PDFFont = font, color = rgb(0.1, 0.12, 0.16)) =>
+  const text = (t: string, x: number, size = 10, f: PDFFont = font, color = INK) =>
     page.drawText(safe(t), { x, y, size, font: f, color });
   const right = (t: string, xEnd: number, size = 9, f: PDFFont = font) => {
     const st = safe(t);
-    page.drawText(st, { x: xEnd - f.widthOfTextAtSize(st, size), y, size, font: f, color: rgb(0.1, 0.12, 0.16) });
+    page.drawText(st, { x: xEnd - f.widthOfTextAtSize(st, size), y, size, font: f, color: INK });
   };
   const rule = (yy: number) =>
     page.drawLine({
@@ -42,16 +102,48 @@ export async function renderPdf(s: Statement): Promise<Uint8Array> {
       color: rgb(0.8, 0.82, 0.85),
     });
 
+  /** Miniature d'un fournisseur ; (x, bottom) = coin inférieur gauche. */
+  const drawLogo = (sup: StatementSupplier, x: number, bottom: number, size = LOGO) => {
+    const img = images.get(sup.id);
+    if (img) {
+      page.drawRectangle({
+        x,
+        y: bottom,
+        width: size,
+        height: size,
+        color: rgb(1, 1, 1),
+        borderColor: rgb(0.85, 0.87, 0.9),
+        borderWidth: 0.4,
+      });
+      const inner = size - 2;
+      const k = Math.min(inner / img.width, inner / img.height);
+      const w = img.width * k;
+      const h = img.height * k;
+      page.drawImage(img, { x: x + (size - w) / 2, y: bottom + (size - h) / 2, width: w, height: h });
+    } else {
+      page.drawCircle({ x: x + size / 2, y: bottom + size / 2, size: size / 2, color: hexColor(sup.color) });
+      const fs = size * 0.4;
+      const label = safe(initials(sup.name));
+      page.drawText(label, {
+        x: x + size / 2 - bold.widthOfTextAtSize(label, fs) / 2,
+        y: bottom + size / 2 - fs * 0.35,
+        size: fs,
+        font: bold,
+        color: rgb(1, 1, 1),
+      });
+    }
+  };
+
   const [a, b] = s.members;
 
   text("État des comptes", MARGIN, 20, bold);
   y -= 22;
   text(s.members.length === 2 ? `Entre ${a.name} et ${b.name}` : "Compte partagé", MARGIN, 11);
   y -= 15;
-  text(`Généré le ${s.generatedAt} par ${s.generatedBy}`, MARGIN, 9, font, rgb(0.4, 0.44, 0.5));
+  text(`Généré le ${s.generatedAt} par ${s.generatedBy}`, MARGIN, 9, font, GRAY);
   y -= 28;
 
-  // Solde final
+  // Résumé en une phrase
   page.drawRectangle({
     x: MARGIN,
     y: y - 10,
@@ -60,7 +152,40 @@ export async function renderPdf(s: Statement): Promise<Uint8Array> {
     color: rgb(0.93, 0.95, 0.99),
   });
   text(fit(s.sentence, bold, 12, PAGE_W - 2 * MARGIN - 20), MARGIN + 10, 12, bold);
-  y -= 40;
+  y -= 46;
+
+  // Solde de chacun : un encadré par personne
+  if (s.balances.length) {
+    const gap = 12;
+    const boxW = (PAGE_W - 2 * MARGIN - gap) / 2;
+    const boxH = 62;
+    const top = y + 14; // haut de l'encadré
+    s.balances.forEach((bal, i) => {
+      const x = MARGIN + i * (boxW + gap);
+      const owed = bal.net > 0;
+      const owes = bal.net < 0;
+      const tone = owed ? GREEN : owes ? RED : GRAY;
+      page.drawRectangle({
+        x,
+        y: top - boxH,
+        width: boxW,
+        height: boxH,
+        color: owed ? rgb(0.92, 0.97, 0.94) : owes ? rgb(0.99, 0.93, 0.92) : rgb(0.95, 0.96, 0.97),
+        borderColor: tone,
+        borderWidth: 0.8,
+      });
+      page.drawText(fit(bal.member.name, bold, 11, boxW - 24), { x: x + 12, y: top - 17, size: 11, font: bold, color: INK });
+      page.drawText(owed ? "On lui doit" : owes ? "Doit" : "Comptes à jour", {
+        x: x + 12,
+        y: top - 31,
+        size: 9,
+        font,
+        color: tone,
+      });
+      page.drawText(safe(formatMoney(Math.abs(bal.net))), { x: x + 12, y: top - 53, size: 19, font: bold, color: tone });
+    });
+    y = top - boxH - 18;
+  }
 
   // Totaux par personne
   for (const t of s.totals) {
@@ -71,36 +196,68 @@ export async function renderPdf(s: Statement): Promise<Uint8Array> {
     );
     y -= 13;
   }
+
+  // Légende des fournisseurs utilisés
+  const usedIds = new Set(s.txs.flatMap((t) => t.supplier_ids));
+  const used = s.suppliers.filter((x) => usedIds.has(x.id));
+  if (used.length) {
+    y -= 6;
+    text("Fournisseurs :", MARGIN, 9, bold);
+    let x = MARGIN + bold.widthOfTextAtSize("Fournisseurs :", 9) + 10;
+    for (const sup of used) {
+      const label = fit(sup.name, font, 9, 160);
+      const w = LOGO + 4 + font.widthOfTextAtSize(label, 9) + 14;
+      if (x + w > PAGE_W - MARGIN) {
+        x = MARGIN;
+        y -= 16;
+      }
+      drawLogo(sup, x, y - 3);
+      page.drawText(label, { x: x + LOGO + 4, y, size: 9, font, color: INK });
+      x += w;
+    }
+    y -= 8;
+  }
   y -= 14;
 
-  // Colonnes
-  const col = { date: MARGIN, desc: 108, type: 285, payer: 340, amount: 462, share: PAGE_W - MARGIN };
+  // Colonnes (les miniatures occupent la première, devant la date)
+  const col = { logo: MARGIN, date: 88, desc: 142, sup: 424, type: 548, payer: 600, amount: 722, share: PAGE_W - MARGIN };
+  const descW = col.sup - col.desc - 10;
+  const supW = col.type - col.sup - 10;
+  const LINE = 11;
   const header = () => {
     text("Date", col.date, 9, bold);
     text("Description", col.desc, 9, bold);
+    text("Fournisseurs", col.sup, 9, bold);
     text("Type", col.type, 9, bold);
     text("Payé par", col.payer, 9, bold);
     right("Montant", col.amount, 9, bold);
     right("Dette générée", col.share, 9, bold);
     y -= 6;
     rule(y);
-    y -= 14;
+    y -= 16;
   };
   header();
 
   for (const t of s.txs) {
-    if (y < MARGIN + 30) {
+    const sups = t.supplier_ids.map((id) => supplierById.get(id)).filter((x): x is StatementSupplier => !!x);
+    const descLines = wrap(t.description, font, 9, descW);
+    const supLines = sups.length ? wrap(sups.map((x) => x.name).join(", "), font, 9, supW) : [];
+    const lines = Math.max(descLines.length, supLines.length, 1);
+    const rowH = lines * LINE + 7;
+    if (y - (lines - 1) * LINE < MARGIN + 30) {
       page = doc.addPage([PAGE_W, PAGE_H]);
       y = PAGE_H - MARGIN;
       header();
     }
+    sups.slice(0, MAX_LOGOS).forEach((sup, i) => drawLogo(sup, col.logo + i * (LOGO + LOGO_GAP), y - 3));
     text(t.occurred_on, col.date, 9);
-    text(fit(t.description, font, 9, col.type - col.desc - 8), col.desc, 9);
+    descLines.forEach((l, k) => page.drawText(l, { x: col.desc, y: y - k * LINE, size: 9, font, color: INK }));
+    supLines.forEach((l, k) => page.drawText(l, { x: col.sup, y: y - k * LINE, size: 9, font, color: INK }));
     text(t.kind === "expense" ? "Dépense" : t.kind === "opening" ? "Solde" : "Remb.", col.type, 9);
-    text(fit(t.payer_name, font, 9, col.amount - col.payer - 55), col.payer, 9);
+    text(fit(t.payer_name, font, 9, col.amount - col.payer - 62), col.payer, 9);
     right(formatMoney(t.amount_cents), col.amount);
     right(formatMoney(t.other_share_cents), col.share);
-    y -= 15;
+    y -= rowH;
   }
   if (s.txs.length === 0) text("Aucune transaction.", col.date, 9);
 

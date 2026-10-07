@@ -60,6 +60,8 @@ const statements = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ
   )`,
+  `ALTER TABLE attachments ALTER COLUMN data DROP NOT NULL`,
+  `ALTER TABLE attachments ADD COLUMN IF NOT EXISTS blob_pathname TEXT`,
   `CREATE INDEX IF NOT EXISTS idx_att_tx ON attachments(transaction_id)`,
   `CREATE INDEX IF NOT EXISTS idx_tx_ledger ON transactions(ledger_id, occurred_on)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_ledger ON audit_log(ledger_id, created_at DESC)`,

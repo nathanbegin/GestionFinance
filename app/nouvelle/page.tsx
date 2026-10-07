@@ -15,6 +15,7 @@ export default async function NewTransactionPage() {
           <TransactionForm
             members={members}
             submitLabel="Ajouter"
+            ledgerId={user.ledger_id}
             initial={{
               kind: "expense",
               description: "",

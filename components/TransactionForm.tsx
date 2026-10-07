@@ -20,16 +20,19 @@ export default function TransactionForm({
   members,
   initial,
   submitLabel,
+  ledgerId,
 }: {
   members: Member[];
   initial: Initial;
   submitLabel: string;
+  ledgerId: number;
 }) {
   const [state, action, pending] = useActionState(saveTransaction, undefined);
   const [kind, setKind] = useState(initial.kind);
+  const [uploading, setUploading] = useState(false);
 
   return (
-    <form action={action} className="card stack" encType="multipart/form-data">
+    <form action={action} className="card stack">
       {initial.id && <input type="hidden" name="id" value={initial.id} />}
       <div className="row">
         <label>
@@ -95,9 +98,9 @@ export default function TransactionForm({
           doit ce montant. Si chacun a un solde, ajoutez un solde de départ de chaque côté : ils se compensent.
         </p>
       )}
-      <FilePicker />
+      <FilePicker ledgerId={ledgerId} onBusy={setUploading} />
       {state?.error && <p className="error">{state.error}</p>}
-      <button disabled={pending}>{submitLabel}</button>
+      <button disabled={pending || uploading}>{uploading ? "Envoi des fichiers…" : submitLabel}</button>
     </form>
   );
 }

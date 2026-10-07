@@ -10,7 +10,7 @@ import { getMembers, getTransaction } from "@/lib/ledger";
 import { logAudit, type Snapshot } from "@/lib/audit";
 import { parseAmount } from "@/lib/money";
 import { MAX_ROWS, parseWorkbook } from "@/lib/importXlsx";
-import { insertAttachments, prepareFiles, type Prepared } from "@/lib/attachments";
+import { insertAttachments, prepareUploads, type Prepared } from "@/lib/attachments";
 
 export type FormState = { error?: string; ok?: string; details?: string[] } | undefined;
 
@@ -118,7 +118,7 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
   const date = str(f, "occurred_on");
   const pct = Number(str(f, "share_pct") || String(user.default_share_pct));
   const invoice = str(f, "invoice_number") || null;
-  const files = f.getAll("files").filter((x): x is File => x instanceof File && x.size > 0);
+  const uploadsRaw = String(f.get("uploads") ?? "");
 
   if (kind !== "expense" && kind !== "repayment" && kind !== "opening") return { error: "Type invalide." };
   if (!description || description.length > 200) return { error: "Description requise (200 caractères max)." };
@@ -127,10 +127,11 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
   if (!payer) return { error: "Payeur invalide." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) return { error: "Date invalide." };
   if (invoice && invoice.length > 50) return { error: "Numéro de facture : 50 caractères max." };
-  const prep = await prepareFiles(files);
-  if ("error" in prep) return { error: prep.error };
   if (kind === "expense" && (!Number.isInteger(pct) || pct < 0 || pct > 100))
     return { error: "La part de l'autre doit être un entier entre 0 et 100 %." };
+
+  const prep = await prepareUploads(user.ledger_id, uploadsRaw);
+  if ("error" in prep) return { error: prep.error };
 
   const otherShare = kind !== "expense" ? amount : Math.round((amount * pct) / 100);
   const after: Snapshot = {

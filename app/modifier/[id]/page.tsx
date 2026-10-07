@@ -30,6 +30,7 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
         <TransactionForm
           members={members}
           submitLabel="Enregistrer les modifications"
+          ledgerId={user.ledger_id}
           initial={{
             id: tx.id,
             kind: tx.kind,

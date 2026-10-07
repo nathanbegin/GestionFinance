@@ -10,6 +10,7 @@ export default function Nav({ name }: { name: string }) {
       <strong>Comptes partagés</strong>
       <nav>
         <Link href="/">Accueil</Link>
+        <Link href="/importer">Importer</Link>
         <Link href="/historique">Historique</Link>
         <Link href="/parametres">Paramètres</Link>
       </nav>

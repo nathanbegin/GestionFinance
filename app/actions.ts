@@ -4,13 +4,14 @@ import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { q } from "@/lib/db";
+import { q, qTransaction } from "@/lib/db";
 import { createSession, destroySession, requireUser } from "@/lib/auth";
 import { getMembers, getTransaction } from "@/lib/ledger";
 import { logAudit, type Snapshot } from "@/lib/audit";
 import { parseAmount } from "@/lib/money";
+import { MAX_ROWS, parseWorkbook } from "@/lib/importXlsx";
 
-export type FormState = { error?: string; ok?: string } | undefined;
+export type FormState = { error?: string; ok?: string; details?: string[] } | undefined;
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 
@@ -150,6 +151,7 @@ export async function deleteTransaction(f: FormData) {
   const id = Number(str(f, "id"));
   const before = await getTransaction(user.ledger_id, id);
   if (!before) return;
+  if (before.created_by !== user.id) return; // seul le créateur peut supprimer
   await q("UPDATE transactions SET deleted_at = now() WHERE id = $1 AND ledger_id = $2", [id, user.ledger_id]);
   await logAudit(user.ledger_id, user.id, "transaction.delete", id, {
     before: {
@@ -163,6 +165,55 @@ export async function deleteTransaction(f: FormData) {
   });
   revalidatePath("/");
   revalidatePath("/historique");
+}
+
+/* ---------- Importation en lot ---------- */
+
+export async function importTransactions(_: FormState, f: FormData): Promise<FormState> {
+  const user = await requireUser();
+  const members = await getMembers(user.ledger_id);
+  if (members.length !== 2) return { error: "Le deuxième participant doit d'abord rejoindre le compte." };
+
+  const file = f.get("file");
+  if (!(file instanceof File) || file.size === 0) return { error: "Choisissez un fichier .xlsx." };
+  if (file.size > 2_000_000) return { error: "Fichier trop volumineux (2 Mo max)." };
+
+  const { rows, errors } = await parseWorkbook(await file.arrayBuffer(), members, user);
+  if (errors.length)
+    return { error: "Rien n'a été importé. Corrigez le fichier et réessayez.", details: errors.slice(0, 30) };
+  if (rows.length > MAX_ROWS) return { error: `Maximum ${MAX_ROWS} lignes par fichier.` };
+
+  // Tout ou rien : chaque transaction est suivie de son entrée dans le journal.
+  const queries = rows.flatMap((r) => [
+    {
+      text: `INSERT INTO transactions (ledger_id, kind, paid_by, amount_cents, other_share_cents, description, occurred_on, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      params: [user.ledger_id, r.kind, r.paid_by, r.amount_cents, r.other_share_cents, r.description, r.occurred_on, user.id],
+    },
+    {
+      text: `INSERT INTO audit_log (ledger_id, user_id, transaction_id, action, details)
+             VALUES ($1, $2, currval(pg_get_serial_sequence('transactions','id')), 'transaction.create', $3)`,
+      params: [
+        user.ledger_id,
+        user.id,
+        JSON.stringify({
+          after: {
+            kind: r.kind,
+            description: r.description,
+            amount_cents: r.amount_cents,
+            paid_by_name: r.paid_by_name,
+            other_share_cents: r.other_share_cents,
+            occurred_on: r.occurred_on,
+          } satisfies Snapshot,
+        }),
+      ],
+    },
+  ]);
+  await qTransaction(queries);
+
+  revalidatePath("/");
+  revalidatePath("/historique");
+  return { ok: `${rows.length} transaction${rows.length > 1 ? "s" : ""} importée${rows.length > 1 ? "s" : ""}.` };
 }
 
 /* ---------- Paramètres ---------- */

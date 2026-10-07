@@ -88,3 +88,7 @@ code.invite { font-size: 1.2rem; letter-spacing: 0.1em; font-weight: 700; }
   background: var(--text); color: var(--card); padding: 10px 16px; border-radius: 10px;
   font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,0.25);
 }
+.auth-header { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
+.auth-header h1 { margin: 6px 0 0; font-size: 1.6rem; }
+.auth-header p { margin: 0; }
+ul.errors { margin: 0; padding-left: 18px; color: var(--bad); font-size: 0.9rem; }

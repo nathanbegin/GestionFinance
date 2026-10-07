@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getUser } from "@/lib/auth";
+import AuthHeader from "@/components/AuthHeader";
 import AuthForm from "@/components/AuthForm";
 
 export default async function RegisterPage({
@@ -12,7 +13,7 @@ export default async function RegisterPage({
   const { invite } = await searchParams;
   return (
     <main className="center stack">
-      <h1>Créer un compte</h1>
+      <AuthHeader subtitle="Créer un compte" />
       <AuthForm mode="register" invite={invite ?? ""} />
       <p className="muted">
         Déjà un compte ? <Link href="/login">Se connecter</Link>

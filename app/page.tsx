@@ -92,10 +92,12 @@ export default async function Home() {
                 <strong>{formatMoney(t.amount_cents)}</strong>
                 <div className="actions">
                   <Link href={`/modifier/${t.id}`}>Modifier</Link>
-                  <form action={deleteTransaction}>
-                    <input type="hidden" name="id" value={t.id} />
-                    <DeleteButton />
-                  </form>
+                  {t.created_by === user.id && (
+                    <form action={deleteTransaction}>
+                      <input type="hidden" name="id" value={t.id} />
+                      <DeleteButton />
+                    </form>
+                  )}
                 </div>
               </div>
             </div>

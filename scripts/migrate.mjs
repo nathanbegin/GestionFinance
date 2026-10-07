@@ -45,6 +45,20 @@ const statements = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS default_share_pct INTEGER NOT NULL DEFAULT 100 CHECK (default_share_pct BETWEEN 0 AND 100)`,
+  `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS invoice_number TEXT`,
+  `CREATE TABLE IF NOT EXISTS attachments (
+    id SERIAL PRIMARY KEY,
+    ledger_id INTEGER NOT NULL REFERENCES ledgers(id),
+    transaction_id INTEGER NOT NULL REFERENCES transactions(id),
+    filename TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    data BYTEA NOT NULL,
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    deleted_at TIMESTAMPTZ
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_att_tx ON attachments(transaction_id)`,
   `CREATE INDEX IF NOT EXISTS idx_tx_ledger ON transactions(ledger_id, occurred_on)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_ledger ON audit_log(ledger_id, created_at DESC)`,
 ];

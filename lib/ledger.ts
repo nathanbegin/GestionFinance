@@ -13,7 +13,29 @@ export type Tx = {
   occurred_on: string; // YYYY-MM-DD
   created_by: number;
   payer_name: string;
+  invoice_number: string | null;
 };
+
+export type Attachment = {
+  id: number;
+  transaction_id: number;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  created_by: number;
+};
+
+/** Pièces jointes actives du compte, groupées par transaction. */
+export async function listAttachments(ledgerId: number): Promise<Map<number, Attachment[]>> {
+  const rows = await q<Attachment>(
+    `SELECT id, transaction_id, filename, content_type, size_bytes, created_by
+     FROM attachments WHERE ledger_id = $1 AND deleted_at IS NULL ORDER BY id`,
+    [ledgerId],
+  );
+  const map = new Map<number, Attachment[]>();
+  for (const a of rows) map.set(a.transaction_id, [...(map.get(a.transaction_id) ?? []), a]);
+  return map;
+}
 
 export async function getMembers(ledgerId: number): Promise<Member[]> {
   return q<Member>("SELECT id, name FROM users WHERE ledger_id = $1 ORDER BY id", [ledgerId]);
@@ -22,7 +44,7 @@ export async function getMembers(ledgerId: number): Promise<Member[]> {
 export async function listTransactions(ledgerId: number): Promise<Tx[]> {
   return q<Tx>(
     `SELECT t.id, t.kind, t.paid_by, t.amount_cents, t.other_share_cents, t.description,
-            to_char(t.occurred_on, 'YYYY-MM-DD') AS occurred_on, t.created_by, u.name AS payer_name
+            to_char(t.occurred_on, 'YYYY-MM-DD') AS occurred_on, t.created_by, u.name AS payer_name, t.invoice_number
      FROM transactions t JOIN users u ON u.id = t.paid_by
      WHERE t.ledger_id = $1 AND t.deleted_at IS NULL
      ORDER BY t.occurred_on DESC, t.id DESC`,
@@ -33,7 +55,7 @@ export async function listTransactions(ledgerId: number): Promise<Tx[]> {
 export async function getTransaction(ledgerId: number, id: number): Promise<Tx | null> {
   const rows = await q<Tx>(
     `SELECT t.id, t.kind, t.paid_by, t.amount_cents, t.other_share_cents, t.description,
-            to_char(t.occurred_on, 'YYYY-MM-DD') AS occurred_on, t.created_by, u.name AS payer_name
+            to_char(t.occurred_on, 'YYYY-MM-DD') AS occurred_on, t.created_by, u.name AS payer_name, t.invoice_number
      FROM transactions t JOIN users u ON u.id = t.paid_by
      WHERE t.ledger_id = $1 AND t.id = $2 AND t.deleted_at IS NULL`,
     [ledgerId, id],

@@ -8,6 +8,7 @@ export type Snapshot = {
   paid_by_name: string;
   other_share_cents: number;
   occurred_on: string;
+  invoice_number?: string | null;
 };
 
 export async function logAudit(
@@ -27,7 +28,7 @@ export type AuditRow = {
   id: number;
   action: string;
   transaction_id: number | null;
-  details: { before?: Snapshot; after?: Snapshot; name?: string; default_share_pct?: number } | null;
+  details: { before?: Snapshot; after?: Snapshot; name?: string; default_share_pct?: number; filename?: string; description?: string } | null;
   created_at: Date;
   user_name: string;
 };
@@ -44,7 +45,7 @@ export async function listAudit(ledgerId: number, limit = 200): Promise<AuditRow
 const KIND: Record<string, string> = { expense: "Dépense", repayment: "Remboursement" };
 
 function describe(s: Snapshot) {
-  return `${KIND[s.kind] ?? s.kind} « ${s.description} » de ${formatMoney(s.amount_cents)} (payé par ${s.paid_by_name}, ${s.occurred_on})`;
+  return `${KIND[s.kind] ?? s.kind} « ${s.description} » de ${formatMoney(s.amount_cents)} (payé par ${s.paid_by_name}, ${s.occurred_on})${s.invoice_number ? `, facture ${s.invoice_number}` : ""}`;
 }
 
 /** Libellé lisible d'une ligne du journal */
@@ -70,9 +71,15 @@ export function auditText(row: AuditRow): { verb: string; lines: string[] } {
             `Part de l'autre : ${formatMoney(b.other_share_cents)} → ${formatMoney(a.other_share_cents)}`,
           );
         if (b.occurred_on !== a.occurred_on) lines.push(`Date : ${b.occurred_on} → ${a.occurred_on}`);
+        if ((b.invoice_number ?? "") !== (a.invoice_number ?? ""))
+          lines.push(`Numéro de facture : ${b.invoice_number || "(aucun)"} → ${a.invoice_number || "(aucun)"}`);
       }
       return { verb: "a modifié", lines: [d?.after ? `« ${d.after.description} »` : "", ...lines].filter(Boolean) };
     }
+    case "attachment.add":
+      return { verb: "a joint un fichier", lines: [`${d?.filename ?? ""} → « ${d?.description ?? ""} »`] };
+    case "attachment.remove":
+      return { verb: "a retiré un fichier", lines: [`${d?.filename ?? ""} de « ${d?.description ?? ""} »`] };
     case "ledger.create":
       return { verb: "a créé le compte partagé", lines: [] };
     case "ledger.join":

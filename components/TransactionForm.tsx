@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { saveTransaction } from "@/app/actions";
+import FilePicker from "./FilePicker";
 
 type Member = { id: number; name: string };
 export type Initial = {
@@ -12,6 +13,7 @@ export type Initial = {
   paid_by: number;
   share_pct: number;
   occurred_on: string;
+  invoice_number: string;
 };
 
 export default function TransactionForm({
@@ -27,7 +29,7 @@ export default function TransactionForm({
   const [kind, setKind] = useState(initial.kind);
 
   return (
-    <form action={action} className="card stack">
+    <form action={action} className="card stack" encType="multipart/form-data">
       {initial.id && <input type="hidden" name="id" value={initial.id} />}
       <div className="row">
         <label>
@@ -45,6 +47,10 @@ export default function TransactionForm({
       <label>
         Description
         <input name="description" required maxLength={200} defaultValue={initial.description} />
+      </label>
+      <label>
+        Numéro de facture <span className="muted">(facultatif)</span>
+        <input name="invoice_number" maxLength={50} defaultValue={initial.invoice_number} />
       </label>
       <div className="row">
         <label>
@@ -76,6 +82,7 @@ export default function TransactionForm({
           <span className="muted">100 = l&apos;autre vous doit tout, 50 = partage égal, 0 = dépense personnelle. (Valeur par défaut modifiable dans Paramètres.)</span>
         </label>
       )}
+      <FilePicker />
       {state?.error && <p className="error">{state.error}</p>}
       <button disabled={pending}>{submitLabel}</button>
     </form>

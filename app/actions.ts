@@ -5,11 +5,12 @@ import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { q, qTransaction } from "@/lib/db";
-import { createSession, destroySession, requireUser } from "@/lib/auth";
+import { createSession, destroySession, requireUser, type User } from "@/lib/auth";
 import { getMembers, getTransaction } from "@/lib/ledger";
 import { logAudit, type Snapshot } from "@/lib/audit";
 import { parseAmount } from "@/lib/money";
 import { MAX_ROWS, parseWorkbook } from "@/lib/importXlsx";
+import { insertAttachments, prepareFiles, type Prepared } from "@/lib/attachments";
 
 export type FormState = { error?: string; ok?: string; details?: string[] } | undefined;
 
@@ -79,6 +80,31 @@ export async function logout() {
 
 /* ---------- Transactions ---------- */
 
+async function attach(user: User, txId: number, description: string, items: Prepared[]) {
+  await insertAttachments(user.ledger_id, txId, user.id, items);
+  for (const a of items)
+    await logAudit(user.ledger_id, user.id, "attachment.add", txId, { filename: a.filename, description });
+}
+
+export async function deleteAttachment(f: FormData) {
+  const user = await requireUser();
+  const id = Number(str(f, "id"));
+  const rows = await q<{ transaction_id: number; filename: string; description: string; created_by: number }>(
+    `SELECT a.transaction_id, a.filename, t.description, a.created_by
+     FROM attachments a JOIN transactions t ON t.id = a.transaction_id
+     WHERE a.id = $1 AND a.ledger_id = $2 AND a.deleted_at IS NULL`,
+    [id, user.ledger_id],
+  );
+  const a = rows[0];
+  if (!a || a.created_by !== user.id) return; // seul l'auteur de l'envoi peut retirer le fichier
+  await q("UPDATE attachments SET deleted_at = now() WHERE id = $1", [id]);
+  await logAudit(user.ledger_id, user.id, "attachment.remove", a.transaction_id, {
+    filename: a.filename,
+    description: a.description,
+  });
+  revalidatePath("/", "layout");
+}
+
 export async function saveTransaction(_: FormState, f: FormData): Promise<FormState> {
   const user = await requireUser();
   const members = await getMembers(user.ledger_id);
@@ -91,6 +117,8 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
   const paidBy = Number(str(f, "paid_by"));
   const date = str(f, "occurred_on");
   const pct = Number(str(f, "share_pct") || String(user.default_share_pct));
+  const invoice = str(f, "invoice_number") || null;
+  const files = f.getAll("files").filter((x): x is File => x instanceof File && x.size > 0);
 
   if (kind !== "expense" && kind !== "repayment") return { error: "Type invalide." };
   if (!description || description.length > 200) return { error: "Description requise (200 caractères max)." };
@@ -98,6 +126,9 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
   const payer = members.find((m) => m.id === paidBy);
   if (!payer) return { error: "Payeur invalide." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) return { error: "Date invalide." };
+  if (invoice && invoice.length > 50) return { error: "Numéro de facture : 50 caractères max." };
+  const prep = await prepareFiles(files);
+  if ("error" in prep) return { error: prep.error };
   if (kind === "expense" && (!Number.isInteger(pct) || pct < 0 || pct > 100))
     return { error: "La part de l'autre doit être un entier entre 0 et 100 %." };
 
@@ -109,6 +140,7 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
     paid_by_name: payer.name,
     other_share_cents: otherShare,
     occurred_on: date,
+    invoice_number: invoice,
   };
 
   if (idRaw) {
@@ -117,9 +149,9 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
     if (!before) return { error: "Transaction introuvable." };
     await q(
       `UPDATE transactions SET kind=$1, paid_by=$2, amount_cents=$3, other_share_cents=$4,
-         description=$5, occurred_on=$6, updated_at=now()
-       WHERE id=$7 AND ledger_id=$8 AND deleted_at IS NULL`,
-      [kind, paidBy, amount, otherShare, description, date, id, user.ledger_id],
+         description=$5, occurred_on=$6, invoice_number=$7, updated_at=now()
+       WHERE id=$8 AND ledger_id=$9 AND deleted_at IS NULL`,
+      [kind, paidBy, amount, otherShare, description, date, invoice, id, user.ledger_id],
     );
     await logAudit(user.ledger_id, user.id, "transaction.update", id, {
       before: {
@@ -129,19 +161,22 @@ export async function saveTransaction(_: FormState, f: FormData): Promise<FormSt
         paid_by_name: before.payer_name,
         other_share_cents: before.other_share_cents,
         occurred_on: before.occurred_on,
+        invoice_number: before.invoice_number,
       } satisfies Snapshot,
       after,
     });
+    await attach(user, id, description, prep.prepared);
   } else {
     const rows = await q<{ id: number }>(
-      `INSERT INTO transactions (ledger_id, kind, paid_by, amount_cents, other_share_cents, description, occurred_on, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-      [user.ledger_id, kind, paidBy, amount, otherShare, description, date, user.id],
+      `INSERT INTO transactions (ledger_id, kind, paid_by, amount_cents, other_share_cents, description, occurred_on, created_by, invoice_number)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [user.ledger_id, kind, paidBy, amount, otherShare, description, date, user.id, invoice],
     );
     await logAudit(user.ledger_id, user.id, "transaction.create", rows[0].id, { after });
+    await attach(user, rows[0].id, description, prep.prepared);
   }
 
-  revalidatePath("/");
+  revalidatePath("/", "layout");
   revalidatePath("/historique");
   redirect("/");
 }
@@ -161,9 +196,10 @@ export async function deleteTransaction(f: FormData) {
       paid_by_name: before.payer_name,
       other_share_cents: before.other_share_cents,
       occurred_on: before.occurred_on,
+      invoice_number: before.invoice_number,
     } satisfies Snapshot,
   });
-  revalidatePath("/");
+  revalidatePath("/", "layout");
   revalidatePath("/historique");
 }
 
@@ -186,9 +222,9 @@ export async function importTransactions(_: FormState, f: FormData): Promise<For
   // Tout ou rien : chaque transaction est suivie de son entrée dans le journal.
   const queries = rows.flatMap((r) => [
     {
-      text: `INSERT INTO transactions (ledger_id, kind, paid_by, amount_cents, other_share_cents, description, occurred_on, created_by)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      params: [user.ledger_id, r.kind, r.paid_by, r.amount_cents, r.other_share_cents, r.description, r.occurred_on, user.id],
+      text: `INSERT INTO transactions (ledger_id, kind, paid_by, amount_cents, other_share_cents, description, occurred_on, created_by, invoice_number)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      params: [user.ledger_id, r.kind, r.paid_by, r.amount_cents, r.other_share_cents, r.description, r.occurred_on, user.id, r.invoice_number],
     },
     {
       text: `INSERT INTO audit_log (ledger_id, user_id, transaction_id, action, details)
@@ -204,6 +240,7 @@ export async function importTransactions(_: FormState, f: FormData): Promise<For
             paid_by_name: r.paid_by_name,
             other_share_cents: r.other_share_cents,
             occurred_on: r.occurred_on,
+            invoice_number: r.invoice_number,
           } satisfies Snapshot,
         }),
       ],
@@ -211,7 +248,7 @@ export async function importTransactions(_: FormState, f: FormData): Promise<For
   ]);
   await qTransaction(queries);
 
-  revalidatePath("/");
+  revalidatePath("/", "layout");
   revalidatePath("/historique");
   return { ok: `${rows.length} transaction${rows.length > 1 ? "s" : ""} importée${rows.length > 1 ? "s" : ""}.` };
 }

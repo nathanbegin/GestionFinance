@@ -13,7 +13,9 @@ export type Statement = {
 export async function buildStatement(user: User): Promise<Statement> {
   const members = await getMembers(user.ledger_id);
   const all = await listTransactions(user.ledger_id);
-  const txs = [...all].sort((a, b) => a.occurred_on.localeCompare(b.occurred_on) || a.id - b.id);
+  const txs = all
+    .map((t) => (t.invoice_number ? { ...t, description: `${t.description} (fact. ${t.invoice_number})` } : t))
+    .sort((a, b) => a.occurred_on.localeCompare(b.occurred_on) || a.id - b.id);
   const net = computeNet(txs, members);
   const generatedAt = new Intl.DateTimeFormat("fr-CA", {
     dateStyle: "long",

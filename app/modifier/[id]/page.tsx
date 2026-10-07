@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { getMembers, getTransaction } from "@/lib/ledger";
+import { getMembers, getTransaction, listAttachments } from "@/lib/ledger";
+import AttachmentList from "@/components/AttachmentList";
 import { toInput } from "@/lib/money";
 import Nav from "@/components/Nav";
 import TransactionForm from "@/components/TransactionForm";
@@ -11,7 +12,11 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
   const { id } = await params;
   const txId = Number(id);
   if (!Number.isInteger(txId)) notFound();
-  const [tx, members] = await Promise.all([getTransaction(user.ledger_id, txId), getMembers(user.ledger_id)]);
+  const [tx, members, atts] = await Promise.all([
+    getTransaction(user.ledger_id, txId),
+    getMembers(user.ledger_id),
+    listAttachments(user.ledger_id),
+  ]);
   if (!tx) notFound();
 
   const pct =
@@ -33,8 +38,11 @@ export default async function EditPage({ params }: { params: Promise<{ id: strin
             paid_by: tx.paid_by,
             share_pct: pct,
             occurred_on: tx.occurred_on,
+            invoice_number: tx.invoice_number ?? "",
           }}
         />
+        <h2>Pièces jointes</h2>
+        <AttachmentList items={atts.get(tx.id) ?? []} userId={user.id} />
         <p>
           <Link href="/">← Retour</Link>
         </p>

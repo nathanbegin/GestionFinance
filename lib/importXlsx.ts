@@ -2,7 +2,8 @@ import ExcelJS from "exceljs";
 import { parseAmount } from "./money";
 
 export const SHEET = "Dépenses";
-export const HEADERS = ["Date", "Description", "Montant", "Payé par", "Part de l'autre (%)", "Type"] as const;
+export const HEADERS = ["Date", "Description", "Montant", "Payé par", "Part de l'autre (%)", "Type", "Numéro de facture"] as const;
+const REQUIRED_COLS = 6; // la 7e colonne (facture) est facultative : les anciens modèles restent valides
 export const MAX_ROWS = 200;
 export const EXAMPLE_PREFIX = "(exemple)";
 
@@ -15,6 +16,7 @@ export type ImportRow = {
   paid_by: number;
   paid_by_name: string;
   other_share_cents: number;
+  invoice_number: string | null;
 };
 
 type Member = { id: number; name: string };
@@ -70,6 +72,7 @@ export async function buildTemplate(members: Member[], today: string): Promise<A
     { header: HEADERS[3], key: "who", width: 18 },
     { header: HEADERS[4], key: "pct", width: 20 },
     { header: HEADERS[5], key: "kind", width: 16 },
+    { header: HEADERS[6], key: "inv", width: 20 },
   ];
   const head = ws.getRow(1);
   head.font = { bold: true, color: { argb: "FFFFFFFF" } };
@@ -77,7 +80,7 @@ export async function buildTemplate(members: Member[], today: string): Promise<A
 
   const [a, b] = members;
   const date = new Date(today + "T00:00:00Z");
-  ws.addRow({ d: date, desc: "(Exemple) Épicerie", amt: 87.35, who: a?.name ?? "", pct: 50, kind: "Dépense" });
+  ws.addRow({ d: date, desc: "(Exemple) Épicerie", amt: 87.35, who: a?.name ?? "", pct: 50, kind: "Dépense", inv: "F-1001" });
   ws.addRow({ d: date, desc: "(Exemple) Remboursement par virement", amt: 40, who: b?.name ?? a?.name ?? "", pct: "", kind: "Remboursement" });
   ws.getColumn(1).numFmt = "yyyy-mm-dd";
   ws.getColumn(3).numFmt = "#,##0.00";
@@ -109,6 +112,7 @@ export async function buildTemplate(members: Member[], today: string): Promise<A
     `Payé par : nom d'un participant${names.length ? ` (${names.join(" ou ")})` : ""}. Vide = la personne qui importe.`,
     "Part de l'autre (%) : entier de 0 à 100 = part due par l'autre personne. Vide = votre répartition par défaut (Paramètres). Ignoré pour un remboursement.",
     "Type : Dépense ou Remboursement. Vide = Dépense. Un remboursement compte pour 100 % du montant.",
+    "Numéro de facture : facultatif, 50 caractères max. Les pièces jointes (photos, PDF) s'ajoutent ensuite, transaction par transaction.",
     "",
     "Les lignes dont la description commence par « (Exemple) » sont ignorées : vous pouvez les laisser ou les supprimer.",
     `Maximum ${MAX_ROWS} lignes par fichier. Si une seule ligne est invalide, rien n'est importé et les erreurs sont listées.`,
@@ -135,7 +139,7 @@ export async function parseWorkbook(
   if (!ws) return { rows: [], errors: ["Le fichier ne contient aucune feuille."] };
 
   const header = HEADERS.map((_, i) => norm(text(ws.getRow(1).getCell(i + 1).value)));
-  if (HEADERS.some((h, i) => header[i] !== norm(h)))
+  if (HEADERS.slice(0, REQUIRED_COLS).some((h, i) => header[i] !== norm(h)))
     return { rows: [], errors: [`Colonnes attendues (ligne 1) : ${HEADERS.join(" | ")}. Utilisez le modèle.`] };
 
   const rows: ImportRow[] = [];
@@ -163,6 +167,9 @@ export async function parseWorkbook(
     const whoText = text(cells[3].value);
     const payer = whoText ? members.find((m) => norm(m.name) === norm(whoText)) : members.find((m) => m.id === me.id);
     if (!payer) problems.push(`« ${whoText} » n'est pas un participant`);
+
+    const invoice = text(cells[6].value) || null;
+    if (invoice && invoice.length > 50) problems.push("numéro de facture trop long (50 max)");
 
     const kindText = norm(text(cells[5].value));
     let kind: ImportRow["kind"] = "expense";
@@ -192,6 +199,7 @@ export async function parseWorkbook(
       paid_by: payer.id,
       paid_by_name: payer.name,
       other_share_cents: kind === "repayment" ? amount : Math.round((amount * pct) / 100),
+      invoice_number: invoice,
     });
   });
 

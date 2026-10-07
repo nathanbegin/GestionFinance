@@ -1,24 +1,17 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import {
-  balanceForUser,
-  computeNet,
-  getMembers,
-  listTransactions,
-  todayLocal,
-} from "@/lib/ledger";
+import { balanceForUser, computeNet, getMembers, listAttachments, listTransactions, todayLocal } from "@/lib/ledger";
 import { formatMoney } from "@/lib/money";
-import { deleteTransaction } from "@/app/actions";
-import Nav from "@/components/Nav";
-import TransactionForm from "@/components/TransactionForm";
-import DeleteButton from "@/components/DeleteButton";
 import { q } from "@/lib/db";
+import Nav from "@/components/Nav";
+import TxList from "@/components/TxList";
 
 export default async function Home() {
   const user = await requireUser();
-  const [members, txs, ledger] = await Promise.all([
+  const [members, txs, attachments, ledger] = await Promise.all([
     getMembers(user.ledger_id),
     listTransactions(user.ledger_id),
+    listAttachments(user.ledger_id),
     q<{ invite_code: string }>("SELECT invite_code FROM ledgers WHERE id = $1", [user.ledger_id]),
   ]);
   const net = computeNet(txs, members);
@@ -26,14 +19,32 @@ export default async function Home() {
   const complete = members.length === 2;
   const other = members.find((m) => m.id !== user.id);
 
+  const month = todayLocal().slice(0, 7);
+  const inMonth = txs.filter((t) => t.kind === "expense" && t.occurred_on.startsWith(month));
+  const sum = (list: typeof txs) => list.reduce((s, t) => s + t.amount_cents, 0);
+  const monthLabel = new Intl.DateTimeFormat("fr-CA", {
+    month: "long",
+    year: "numeric",
+    timeZone: "America/Toronto",
+  }).format(new Date());
+  const fileCount = [...attachments.values()].reduce((s, l) => s + l.length, 0);
+
   return (
     <>
       <Nav name={user.name} />
       <main>
-        <div className={`card balance ${balance.tone}`}>
-          <div className="muted">Solde</div>
-          <div className="amount">{balance.text}</div>
-        </div>
+        <section className={`hero ${balance.tone}`}>
+          <div className="hero-label">Bonjour {user.name} · solde actuel</div>
+          <div className="hero-amount">{balance.text}</div>
+          <div className="hero-actions">
+            <Link className="button solid" href="/nouvelle">
+              + Nouvelle transaction
+            </Link>
+            <Link className="button ghost" href="/importer">
+              Importer un fichier Excel
+            </Link>
+          </div>
+        </section>
 
         {!complete && (
           <div className="card stack" style={{ marginTop: 16 }}>
@@ -45,6 +56,33 @@ export default async function Home() {
           </div>
         )}
 
+        <div className="kpis">
+          <div className="kpi">
+            <div className="kpi-label">Dépensé en {monthLabel}</div>
+            <div className="kpi-value">{formatMoney(sum(inMonth))}</div>
+          </div>
+          <div className="kpi">
+            <div className="kpi-label">Payé par vous (ce mois)</div>
+            <div className="kpi-value">{formatMoney(sum(inMonth.filter((t) => t.paid_by === user.id)))}</div>
+          </div>
+          <div className="kpi">
+            <div className="kpi-label">Payé par {other?.name ?? "l'autre"} (ce mois)</div>
+            <div className="kpi-value">{formatMoney(sum(inMonth.filter((t) => t.paid_by !== user.id)))}</div>
+          </div>
+          <div className="kpi">
+            <div className="kpi-label">Transactions · pièces jointes</div>
+            <div className="kpi-value">
+              {txs.length} · {fileCount}
+            </div>
+          </div>
+        </div>
+
+        <div className="section-head">
+          <h2>Dernières transactions</h2>
+          <Link href="/transactions">Tout voir →</Link>
+        </div>
+        <TxList txs={txs.slice(0, 5)} userId={user.id} other={other} attachments={attachments} />
+
         <div className="actions-bar">
           <a className="button" href="/api/export/pdf">
             Exporter en PDF
@@ -52,56 +90,6 @@ export default async function Home() {
           <a className="button" href="/api/export/tex">
             Exporter en LaTeX (.tex)
           </a>
-        </div>
-
-        {complete && (
-          <>
-            <h2>Nouvelle transaction</h2>
-            <TransactionForm
-              members={members}
-              submitLabel="Ajouter"
-              initial={{
-                kind: "expense",
-                description: "",
-                amount: "",
-                paid_by: user.id,
-                share_pct: user.default_share_pct,
-                occurred_on: todayLocal(),
-              }}
-            />
-          </>
-        )}
-
-        <h2>Transactions ({txs.length})</h2>
-        <div className="card">
-          {txs.length === 0 && <p className="muted">Aucune transaction pour l&apos;instant.</p>}
-          {txs.map((t) => (
-            <div className="tx" key={t.id}>
-              <div>
-                <div>
-                  {t.description}
-                  <span className="badge">{t.kind === "expense" ? "Dépense" : "Remboursement"}</span>
-                </div>
-                <div className="muted">
-                  {t.kind === "expense" ? "Payé par" : "Remboursé par"}{" "}
-                  {t.paid_by === user.id ? "vous" : t.payer_name} · {t.occurred_on}
-                  {t.kind === "expense" && ` · part de ${t.paid_by === user.id ? (other?.name ?? "l'autre") : "vous"} : ${formatMoney(t.other_share_cents)}`}
-                </div>
-              </div>
-              <div className="right">
-                <strong>{formatMoney(t.amount_cents)}</strong>
-                <div className="actions">
-                  <Link href={`/modifier/${t.id}`}>Modifier</Link>
-                  {t.created_by === user.id && (
-                    <form action={deleteTransaction}>
-                      <input type="hidden" name="id" value={t.id} />
-                      <DeleteButton />
-                    </form>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
         </div>
       </main>
     </>
